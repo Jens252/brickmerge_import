@@ -1,2 +1,2 @@
 # brickmerge_import
-Automatisierte Aufbereitung von Amazon Business Order Reports und Bestellberichten für den Brickmerge-Depot import
+Automatisierte Aufbereitung von Amazon Business Order Reports (Einkäufe) und Bestellberichten (Verkäufe) für den Brickmerge-Depot import
