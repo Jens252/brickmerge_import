@@ -20,7 +20,7 @@ class AmazonSalesImporter(SalesImporter):
         """Processes Amazon seller report and exports in Brickmerge sales format."""
         usecols = [
             'amazon-order-id', 'purchase-date', 'order-status', 'fulfillment-channel', 'product-name', 'ship-country',
-            'asin', 'quantity', 'item-price', 'shipping-price', 'item-promotion-discount', 'ship-promotion-discount'
+            'sku', 'asin', 'quantity', 'item-price', 'shipping-price', 'item-promotion-discount', 'ship-promotion-discount'
         ]
         output_directory = os.path.dirname(os.path.abspath(amazon_sales_report_filename))
         try:
@@ -28,7 +28,7 @@ class AmazonSalesImporter(SalesImporter):
                 amazon_sales_report_filename,
                 sep='\t',
                 on_bad_lines='skip',
-                converters={'product-name': self.get_set_number_from_title},
+                dtype={'sku': str},
                 parse_dates=['purchase-date'],
                 usecols=lambda c: c in usecols
             )
@@ -41,10 +41,10 @@ class AmazonSalesImporter(SalesImporter):
 
         new_orders = self.db.filter_new_sales(amz_report, 'Amazon', 'amazon-order-id', 'asin')
 
-        # Fallback to map set number from ASIN
-        new_orders['set_identifier'] = new_orders['product-name'].fillna(
-            new_orders['asin'].map(self.asin_to_set_number_fallback)
-        )
+        # Get set identifier from ASIN or product name
+        new_orders['set_identifier'] = new_orders['asin'].map(self.asin_to_set_number_fallback).fillna(
+            new_orders['sku'].map(lambda x: x if '-' not in x[:4] and x.count('-') < 2 else None)).fillna(
+            new_orders['product-name'].map(self.get_set_number_from_title))
         if new_orders['set_identifier'].isna().any():
             missing_identifiers = new_orders[new_orders['set_identifier'].isna()]
             print("Notice: Sales without set identifiers exported to 'missing_set_identifiers.csv'.")
