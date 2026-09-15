@@ -2,7 +2,7 @@
 import os
 import numpy as np
 import pandas as pd
-import country_converter as coco
+from eu_countries import is_eu
 from database import Database
 from sales import SalesImporter
 
@@ -81,10 +81,9 @@ class BricklinkSalesImporter(SalesImporter):
             new_items['sale_price'] = new_items['Each']
 
         # Adjust item price for VAT
-        cc = coco.CountryConverter()
         country = new_items['Location'].str.split(',').str[0]
-        is_eu = country.isin(cc.EU.name_short.to_list())
-        new_items['sale_price'] = (new_items['sale_price'] * np.where(is_eu, 1.0, 1.19)).round(2)
+        is_eu_country = country.map(is_eu)
+        new_items['sale_price'] = (new_items['sale_price'] * np.where(is_eu_country, 1.0, 1.19)).round(2)
 
         new_items['sales_cost'] = new_items.apply(
             lambda row: self.get_fees(row['Pmt Method'], row['sale_price'] * row['Qty']), axis=1)
