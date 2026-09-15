@@ -1,0 +1,614 @@
+import io
+import os
+import sys
+import threading
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+
+from database import Database
+from amazon_orders import AmazonPurchasesImporter
+from amazon_sales import AmazonSalesImporter
+from ebay_sales import EbaySalesImporter
+from bricklink_sales import BricklinkSalesImporter
+
+
+class ToolTip:
+    """Floating tooltip window on mouse hover."""
+
+    def __init__(self, widget, text: str):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        self.widget.bind("<Enter>", self.show_tip)
+        self.widget.bind("<Leave>", self.hide_tip)
+
+    def show_tip(self, event=None):
+        if self.tip_window or not self.text:
+            return
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tw.attributes("-topmost", True)
+
+        frame = tk.Frame(tw, background="#1e293b", borderwidth=1, relief="solid")
+        frame.pack()
+        label = tk.Label(
+            frame, text=self.text, justify="left",
+            background="#1e293b", foreground="#f8fafc",
+            font=("Segoe UI", 9), padx=10, pady=6, wraplength=340
+        )
+        label.pack()
+
+    def hide_tip(self, event=None):
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
+
+
+class TextRedirector(io.StringIO):
+    """Redirects stdout and stderr into a Tkinter console widget."""
+
+    def __init__(self, text_widget: tk.Text):
+        super().__init__()
+        self.text_widget = text_widget
+
+    def write(self, string):
+        self.text_widget.configure(state="normal")
+        self.text_widget.insert(tk.END, string)
+        self.text_widget.see(tk.END)
+        self.text_widget.configure(state="disabled")
+
+    def flush(self):
+        pass
+
+
+class ModernImportGUI(tk.Tk):
+    # Palette
+    BG_MAIN = "#f1f5f9"
+    CARD_BG = "#ffffff"
+    ACCENT = "#2563eb"
+    ACCENT_HOVER = "#1d4ed8"
+    TEXT_MAIN = "#0f172a"
+    TEXT_MUTED = "#64748b"
+
+    def __init__(self):
+        super().__init__()
+        self.title("Brickmerge Depot Importer")
+        # self.geometry("940x760")
+        self.minsize(850, 700)
+        self.configure(bg=self.BG_MAIN)
+
+        self.db = Database("import_history.db")
+
+        # Global Depot File (auto-saved)
+        saved_depot = self.db.get_setting("depot_file", "")
+        self.depot_file_var = tk.StringVar(value=saved_depot)
+        self.depot_file_var.trace_add("write", lambda *_: self.db.set_setting("depot_file", self.depot_file_var.get()))
+        self.ek_only_var = self._bind_setting_bool("ek_calculation_only", False)
+
+        self._init_styles()
+        self._build_layout()
+
+        sys.stdout = TextRedirector(self.log_text)
+        sys.stderr = TextRedirector(self.log_text)
+
+    def _init_styles(self):
+        style = ttk.Style(self)
+        style.theme_use("clam")
+
+        # Notebook
+        style.configure("TNotebook", background=self.BG_MAIN, borderwidth=0)
+        style.configure("TNotebook.Tab", font=("Segoe UI", 10, "bold"), padding=(14, 8),
+                        background="#e2e8f0", foreground=self.TEXT_MUTED)
+        style.map("TNotebook.Tab",
+                  background=[("selected", self.CARD_BG)],
+                  foreground=[("selected", self.ACCENT)])
+
+        # Card frames & Labels
+        style.configure("Card.TFrame", background=self.CARD_BG)
+        style.configure("TLabel", background=self.CARD_BG, font=("Segoe UI", 9), foreground=self.TEXT_MAIN)
+        style.configure("Sub.TLabel", background=self.CARD_BG, font=("Segoe UI", 8), foreground=self.TEXT_MUTED)
+        style.configure("Header.TLabel", background=self.CARD_BG, font=("Segoe UI", 10, "bold"),
+                        foreground=self.TEXT_MAIN)
+        style.configure("TCheckbutton", background=self.CARD_BG, font=("Segoe UI", 9))
+
+        # Primary Buttons
+        style.configure("Primary.TButton", font=("Segoe UI", 10, "bold"), padding=(14, 7),
+                        background=self.ACCENT, foreground="#ffffff", borderwidth=0)
+        style.map("Primary.TButton",
+                  background=[("active", self.ACCENT_HOVER), ("pressed", "#1e40af")])
+
+        # Secondary Buttons
+        style.configure("Secondary.TButton", font=("Segoe UI", 9), padding=(10, 4),
+                        background="#f1f5f9", foreground=self.TEXT_MAIN, borderwidth=1)
+        style.map("Secondary.TButton", background=[("active", "#e2e8f0")])
+
+        # Treeview
+        style.configure("Treeview", font=("Segoe UI", 9), rowheight=26, borderwidth=1)
+        style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"), padding=4)
+
+    def _build_layout(self):
+        # 1. Top Card: Depot Selection
+        top_card = ttk.Frame(self, style="Card.TFrame", padding=12)
+        top_card.pack(fill="x", padx=14, pady=(12, 6))
+
+        depot_lbl_row = ttk.Frame(top_card, style="Card.TFrame")
+        depot_lbl_row.pack(fill="x", pady=(0, 4))
+        self.depot_lbl_title = ttk.Label(
+            depot_lbl_row,
+            text="📦 Brickmerge Depot Export (Bestand für FIFO-Verrechnung)",
+            style="Header.TLabel"
+        )
+        self.depot_lbl_title.pack(side="left")
+
+        depot_input_row = ttk.Frame(top_card, style="Card.TFrame")
+        depot_input_row.pack(fill="x")
+        self.depot_entry = ttk.Entry(depot_input_row, textvariable=self.depot_file_var, font=("Segoe UI", 9))
+        self.depot_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.depot_btn_browse = ttk.Button(
+            depot_input_row, text="Durchsuchen...", style="Secondary.TButton", command=self._browse_depot
+        )
+        self.depot_btn_browse.pack(side="left")
+
+        # Checkbox for calculating EK only
+        depot_opt_row = ttk.Frame(top_card, style="Card.TFrame")
+        depot_opt_row.pack(fill="x", pady=(6, 0))
+        self.chk_ek_only = ttk.Checkbutton(
+            depot_opt_row,
+            text="Nur EK berechnen (Depot-CSV-Datei unverändert lassen)",
+            variable=self.ek_only_var
+        )
+        self.chk_ek_only.pack(side="left")
+        ToolTip(
+            self.chk_ek_only,
+            "Für nachträglich erfasste Alt-Verkäufe: Ermittelt den durchschnittlichen Einkaufspreis "
+            "anhand der im Depot vorhandenen Artikel und zieht keine Mengen vom aktuellen Lagerbestand ab."
+        )
+
+        # 2. Tabs
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=False, padx=14, pady=6)
+
+        self._tab_amazon_purchases()
+        self._tab_amazon_sales()
+        self._tab_ebay_sales()
+        self._tab_bricklink_sales()
+        self._tab_settings()
+
+        # Listener zum Ausgrauen des Depot-Bereichs bei Amazon Business Einkauf
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+        # 3. Bottom Console
+        log_card = ttk.Frame(self, style="Card.TFrame", padding=10)
+        log_card.pack(fill="both", expand=True, padx=14, pady=(6, 12))
+
+        log_header = ttk.Frame(log_card, style="Card.TFrame")
+        log_header.pack(fill="x", pady=(0, 4))
+        ttk.Label(log_header, text="📋 Ausführungs-Protokoll", style="Header.TLabel").pack(side="left")
+
+        btn_box = ttk.Frame(log_header, style="Card.TFrame")
+        btn_box.pack(side="right")
+        ttk.Button(btn_box, text="Rollback Sales ID Tracking", style="Secondary.TButton",
+                   command=lambda: self._rollback(True)).pack(side="left", padx=4)
+        ttk.Button(btn_box, text="Rollback Purchases ID Tracking", style="Secondary.TButton",
+                   command=lambda: self._rollback(False)).pack(side="left", padx=4)
+        ttk.Button(btn_box, text="Log leeren", style="Secondary.TButton", command=self._clear_log).pack(
+            side="left", padx=(4, 0)
+        )
+
+        # Terminal text box
+        self.log_text = tk.Text(
+            log_card, wrap="word", height=18, state="disabled",
+            bg="#0f172a", fg="#f8fafc", insertbackground="#ffffff",
+            font=("Consolas", 9), relief="flat", padx=8, pady=8
+        )
+        scrollbar = ttk.Scrollbar(log_card, orient="vertical", command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=scrollbar.set)
+        self.log_text.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+    def _on_tab_changed(self, event=None):
+        """Disables depot controls only when the Amazon Purchases tab is active."""
+        selected_tab_text = self.notebook.tab(self.notebook.select(), "text")
+
+        # Nur beim Einkauf ausgrauen, in allen Verkaufs-Tabs und den Einstellungen aktiv lassen
+        is_purchase_tab = "Einkauf" in selected_tab_text
+        state = "disabled" if is_purchase_tab else "normal"
+
+        self.depot_entry.configure(state=state)
+        self.depot_btn_browse.configure(state=state)
+        self.chk_ek_only.configure(state=state)
+
+    # ---------------- TAB DEFINITIONS ----------------
+
+    def _tab_amazon_purchases(self):
+        tab = ttk.Frame(self.notebook, style="Card.TFrame", padding=16)
+        self.notebook.add(tab, text="Amazon Business Einkaufe")
+
+        file_var = self._bind_setting("amz_b2b_file", "")
+        rec_var = self._bind_setting_bool("amz_use_received", True)
+
+        self._render_file_input(tab, "Amazon Business Orders Report (CSV):", file_var, [("CSV Files", "*.csv")])
+
+        # Language banner note
+        info_box = ttk.Frame(tab, style="Card.TFrame")
+        info_box.pack(fill="x", pady=(4, 6))
+        lbl_hint = ttk.Label(
+            info_box,
+            text="⚠️ Wichtig: Amazon-Konto vor dem Generieren des Berichts auf Englisch stellen!",
+            foreground="#b45309",  # Warm Amber
+            font=("Segoe UI", 9, "bold")
+        )
+        lbl_hint.pack(anchor="w")
+        ToolTip(
+            lbl_hint,
+            "Amazon exportiert Spaltennamen in der jeweils im Account aktiven Oberflächensprache "
+            "(z. B. 'Bestellnummer' statt 'Order ID'). Der Importer erwartet die englischen Original-Header."
+        )
+
+        row_opt = ttk.Frame(tab, style="Card.TFrame")
+        row_opt.pack(fill="x", pady=(8, 12))
+        chk = ttk.Checkbutton(row_opt, text="Erhaltene Stückzahlen abgleichen (Falls Receiving aktiviert bzw. Spalte im Orders Report vorhanden)",
+                              variable=rec_var)
+        chk.pack(side="left")
+        ToolTip(chk, "Nur bereits erhaltene Artikel und Mengen werden importiert.")
+
+        def execute():
+            path = file_var.get().strip()
+            if not self._check_file(path):
+                return
+            imp = AmazonPurchasesImporter(self.db, use_received=rec_var.get())
+            self._async_task(lambda: imp.import_purchases(path))
+
+        ttk.Button(tab, text="Amazon Business Käufe importieren", style="Primary.TButton", command=execute).pack(anchor="e")
+
+    def _tab_amazon_sales(self):
+        tab = ttk.Frame(self.notebook, style="Card.TFrame", padding=16)
+        self.notebook.add(tab, text="Amazon Verkäufe")
+
+        file_var = self._bind_setting("amz_sales_file", "")
+        agg_var = self._bind_setting_bool("amz_agg_sales", True)
+
+        self._render_file_input(tab, "Amazon Bestellbericht (TXT / TSV):", file_var,
+                                [("Text Files", "*.txt"), ("TSV Files", "*.tsv"), ("All", "*.*")])
+
+        row_opt = ttk.Frame(tab, style="Card.TFrame")
+        row_opt.pack(fill="x", pady=(8, 12))
+        self._add_aggregation_checkbox(row_opt, agg_var)
+
+        def execute():
+            path = file_var.get().strip()
+            if not self._check_file(path):
+                return
+            base_s = float(self.db.get_setting("shipping_base", "5.0"))
+            pct_s = float(self.db.get_setting("shipping_percent", "3.0"))
+            imp = AmazonSalesImporter(
+                self.db, aggregate_sales=agg_var.get(),
+                depot_export_file=self.depot_file_var.get().strip() or None,
+                shipping_cost_base=base_s, shipping_cost_percentage=pct_s,
+                ek_calculation_only=self.ek_only_var.get()
+            )
+            self._async_task(lambda: imp.import_sales(path))
+
+        ttk.Button(tab, text="Amazon Verkäufe importieren", style="Primary.TButton", command=execute).pack(anchor="e")
+
+    def _tab_ebay_sales(self):
+        tab = ttk.Frame(self.notebook, style="Card.TFrame", padding=16)
+        self.notebook.add(tab, text="eBay Verkäufe")
+
+        file_var = self._bind_setting("ebay_sales_file", "")
+        agg_var = self._bind_setting_bool("ebay_agg_sales", True)
+        treat_ship_var = self._bind_setting_bool("ebay_treat_shipping_revenue", False)
+
+        self._render_file_input(tab, "eBay Orders Report (CSV):", file_var, [("CSV Files", "*.csv")])
+
+        row_opt = ttk.Frame(tab, style="Card.TFrame")
+        row_opt.pack(fill="x", pady=(6, 4))
+        self._add_aggregation_checkbox(row_opt, agg_var)
+
+        row_opt2 = ttk.Frame(tab, style="Card.TFrame")
+        row_opt2.pack(fill="x", pady=(4, 12))
+        chk_ship = ttk.Checkbutton(row_opt2, text="Versandkosten immer schätzen",
+                                   variable=treat_ship_var)
+        chk_ship.pack(side="left")
+        ToolTip(chk_ship,
+                "Nimmt, auch wenn Versandkosten für eine Bestellung angegeben sind, die geschätzten Versandkosten für die Verkaufskosten.")
+
+        def execute():
+            path = file_var.get().strip()
+            if not self._check_file(path):
+                return
+            base_s = float(self.db.get_setting("shipping_base", "5.0"))
+            pct_s = float(self.db.get_setting("shipping_percent", "3.0"))
+            fee_pct = float(self.db.get_setting("ebay_fee_percent", "12.0"))
+            ad_pct = float(self.db.get_setting("ebay_ad_percent", "2.0"))
+
+            imp = EbaySalesImporter(
+                self.db, aggregate_sales=agg_var.get(),
+                depot_export_file=self.depot_file_var.get().strip() or None,
+                ebay_fee_percent=fee_pct, default_ad_percent=ad_pct,
+                shipping_cost_base=base_s, shipping_cost_percentage=pct_s,
+                always_estimate_real_shipping_cost=treat_ship_var.get(),
+                ek_calculation_only=self.ek_only_var.get()
+            )
+            self._async_task(lambda: imp.import_sales(path))
+
+        ttk.Button(tab, text="eBay Verkäufe importieren", style="Primary.TButton", command=execute).pack(anchor="e")
+
+    def _tab_bricklink_sales(self):
+        tab = ttk.Frame(self.notebook, style="Card.TFrame", padding=16)
+        self.notebook.add(tab, text="Bricklink Verkäufe")
+
+        file_var = self._bind_setting("bl_sales_file", "")
+        agg_var = self._bind_setting_bool("bl_agg_sales", True)
+
+        self._render_file_input(tab, "Bricklink Orders Received Download (CSV):", file_var, [("CSV Files", "*.csv")])
+
+        # Detail items banner note
+        info_box = ttk.Frame(tab, style="Card.TFrame")
+        info_box.pack(fill="x", pady=(4, 6))
+        lbl_hint = ttk.Label(
+            info_box,
+            text="⚠️ Wichtig: Beim Bricklink-Download 'Include detail items' aktivieren!",
+            foreground="#b45309",
+            font=("Segoe UI", 9, "bold")
+        )
+        lbl_hint.pack(anchor="w")
+        ToolTip(
+            lbl_hint,
+            "Wird der Haken bei 'Include detail items' beim Exportieren auf Bricklink nicht gesetzt, "
+            "fehlen alle Artikelzeilen. Der Import kann dann keine Verkäufe erfassen."
+        )
+
+        row_opt = ttk.Frame(tab, style="Card.TFrame")
+        row_opt.pack(fill="x", pady=(4, 12))
+        self._add_aggregation_checkbox(row_opt, agg_var)
+
+        def execute():
+            path = file_var.get().strip()
+            if not self._check_file(path):
+                return
+            bl_fee = float(self.db.get_setting("bl_fee_percent", "3.0"))
+            pp_fee = float(self.db.get_setting("bl_paypal_fee_percent", "2.0"))
+            str_fee = float(self.db.get_setting("bl_stripe_fee_percent", "2.0"))
+
+            imp = BricklinkSalesImporter(
+                self.db,
+                aggregate_sales=agg_var.get(),
+                depot_export_file=self.depot_file_var.get().strip() or None,
+                bricklink_fee_percent=bl_fee,
+                paypal_fee_percent=pp_fee,
+                stripe_fee_percent=str_fee,
+                ek_calculation_only=self.ek_only_var.get()
+            )
+            self._async_task(lambda: imp.import_sales(path))
+
+        ttk.Button(tab, text="Bricklink Verkäufe importieren", style="Primary.TButton", command=execute).pack(anchor="e")
+
+    def _tab_settings(self):
+        tab = ttk.Frame(self.notebook, style="Card.TFrame", padding=16)
+        self.notebook.add(tab, text="⚙️ Einstellungen & Mappings")
+
+        # Top half: Shipping & Fees
+        config_frame = ttk.Frame(tab, style="Card.TFrame")
+        config_frame.pack(fill="x", pady=(0, 12))
+
+        ttk.Label(config_frame, text="Standard-Gebühren & Gemeinsame Versandkostenschätzung",
+                  style="Header.TLabel").pack(anchor="w", pady=(0, 6))
+
+        grid_box = ttk.Frame(config_frame, style="Card.TFrame")
+        grid_box.pack(fill="x")
+
+        # Configuration Items
+        field_entries = {}
+        specs = [
+            ("shipping_base", "Versand pauschal (brutto €):", "5.0",
+             "Für Schätzung Versandkosten (Amazon & eBay): Wird bei eBay nur berücksichtigt, wenn kostenloser Versand vorliegt (bzw. die Zusatzoption aktiv ist)."),
+            ("shipping_percent", "Versand variabel (brutto %):", "3.0",
+             "Für Schätzung Versandkosten (Amazon & eBay): Wird bei eBay nur berücksichtigt, wenn kostenloser Versand vorliegt (bzw. die Zusatzoption aktiv ist)."),
+            ("ebay_fee_percent", "eBay Verkaufsgebühr (netto %):", "12.0", "Reguläre Verkaufsgebühr bei eBay."),
+            ("ebay_ad_percent", "eBay Anzeigen (netto %):", "2.0", "Zuschlag für eBay-Anzeigenverkäufe."),
+            ("bl_fee_percent", "Bricklink Gebühr (brutto %):", "3.0", "Reguläre Verkaufsgebühr auf Bricklink."),
+            ("bl_paypal_fee_percent", "PayPal Kosten (brutto %):", "2.0",
+             "Nur den Anteil eingeben, der NICHT bereits durch die Bricklink Handling Fee abgedeckt ist."),
+            ("bl_stripe_fee_percent", "Stripe Kosten (brutto %):", "2.0",
+             "Nur den Anteil eingeben, der NICHT bereits durch die Bricklink Handling Fee abgedeckt ist."),
+        ]
+
+        for i, (key, label_text, default_val, tip_text) in enumerate(specs):
+            col = (i % 3) * 2
+            row = i // 3
+
+            lbl = ttk.Label(grid_box, text=label_text)
+            lbl.grid(row=row, column=col, sticky="w", padx=(12 if col > 0 else 0, 4), pady=4)
+            ToolTip(lbl, tip_text)
+
+            val = self.db.get_setting(key, default_val)
+            v = tk.StringVar(value=val)
+            ent = ttk.Entry(grid_box, textvariable=v, width=9)
+            ent.grid(row=row, column=col + 1, sticky="w", pady=4)
+            ToolTip(ent, tip_text)
+            field_entries[key] = v
+
+        def save_conf():
+            for k, var in field_entries.items():
+                self.db.set_setting(k, var.get().strip().replace(',', '.'))
+            messagebox.showinfo("Gespeichert", "Versand- und Gebührensätze wurden in der Datenbank gespeichert.")
+
+        ttk.Button(config_frame, text="Gebühren & Versand speichern", style="Secondary.TButton",
+                   command=save_conf).pack(anchor="e", pady=(8, 0))
+
+        # Bottom half: Mappings Treeview
+        map_card = ttk.Frame(tab, style="Card.TFrame")
+        map_card.pack(fill="both", expand=True, pady=(6, 0))
+
+        ttk.Label(map_card, text="Manuelle Set-Zuordnungen (ASIN & eBay Artikel-Nr. ➔ Lego Set)",
+                  style="Header.TLabel").pack(anchor="w", pady=(0, 6))
+
+        tree_split = ttk.Frame(map_card, style="Card.TFrame")
+        tree_split.pack(fill="both", expand=True)
+
+        cols = ("platform", "identifier", "set_number", "note")
+        tree = ttk.Treeview(tree_split, columns=cols, show="headings", height=6)
+        tree.heading("platform", text="Plattform")
+        tree.heading("identifier", text="Identifier (ASIN / eBay Nr.)")
+        tree.heading("set_number", text="Lego Set-Nummer")
+        tree.heading("note", text="Bezeichnung / Notiz")
+
+        tree.column("platform", width=90, anchor="center")
+        tree.column("identifier", width=180)
+        tree.column("set_number", width=140)
+        tree.column("note", width=220)
+
+        tree.pack(side="left", fill="both", expand=True)
+        sb = ttk.Scrollbar(tree_split, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="left", fill="y")
+
+        def reload_tree():
+            for itm in tree.get_children():
+                tree.delete(itm)
+            for m in self.db.get_all_mappings():
+                tree.insert("", "end", values=m)
+
+        reload_tree()
+
+        # Side controls for adding/editing mappings
+        side = ttk.Frame(tree_split, style="Card.TFrame", padding=(12, 0, 0, 0))
+        side.pack(side="right", fill="y")
+
+        p_var = tk.StringVar(value="ASIN")
+        i_var = tk.StringVar()
+        s_var = tk.StringVar()
+        n_var = tk.StringVar()
+
+        ttk.Label(side, text="Plattform:").pack(anchor="w")
+        ttk.Combobox(side, textvariable=p_var, values=["Amazon", "eBay"], state="readonly", width=15).pack(anchor="w",
+                                                                                                         pady=(0, 4))
+        ttk.Label(side, text="Identifier:").pack(anchor="w")
+        ttk.Entry(side, textvariable=i_var, width=17).pack(anchor="w", pady=(0, 4))
+        ttk.Label(side, text="Set-Nr (z.B. 71048-12):").pack(anchor="w")
+        ttk.Entry(side, textvariable=s_var, width=17).pack(anchor="w", pady=(0, 4))
+        ttk.Label(side, text="Notiz:").pack(anchor="w")
+        ttk.Entry(side, textvariable=n_var, width=17).pack(anchor="w", pady=(0, 8))
+
+        def add_item():
+            p, _i, s, n = p_var.get().strip(), i_var.get().strip(), s_var.get().strip(), n_var.get().strip()
+            if not _i or not s:
+                messagebox.showwarning("Fehlende Werte", "Identifier und Set-Nummer sind Pflichtfelder.")
+                return
+            self.db.set_mapping(p, _i, s, n)
+            reload_tree()
+            i_var.set("")
+            s_var.set("")
+            n_var.set("")
+
+        def delete_item():
+            sel = tree.selection()
+            if not sel:
+                return
+            _val = tree.item(sel[0], "values")
+            if messagebox.askyesno("Löschen", f"Zuordnung für '{_val[1]}' entfernen?"):
+                self.db.delete_mapping(_val[0], _val[1])
+                reload_tree()
+
+        def on_select(e):
+            sel = tree.selection()
+            if sel:
+                _v = tree.item(sel[0], "values")
+                p_var.set(_v[0])
+                i_var.set(_v[1])
+                s_var.set(_v[2])
+                n_var.set(_v[3])
+
+        tree.bind("<<TreeviewSelect>>", on_select)
+
+        ttk.Button(side, text="Zuordnung speichern", style="Primary.TButton", command=add_item).pack(fill="x", pady=2)
+        ttk.Button(side, text="Ausgewählte löschen", style="Secondary.TButton", command=delete_item).pack(fill="x",
+                                                                                                          pady=2)
+
+    # ---------------- HELPERS ----------------
+
+    def _add_aggregation_checkbox(self, parent, variable: tk.BooleanVar) -> ttk.Checkbutton:
+        """Creates a standardized aggregation checkbox with explanation tooltip."""
+        chk = ttk.Checkbutton(
+            parent,
+            text="Verkäufe monatlich bündeln",
+            variable=variable
+        )
+        chk.pack(side="left")
+        ToolTip(
+            chk,
+            "Fasst Verkäufe desselben Artikels innerhalb eines Kalendermonats zusammen, "
+            "deren Verkaufspreis im selben ganzzahligen 1€-Intervall liegt (z. B. 39,20 € und 39,80 €)."
+        )
+        return chk
+
+    def _render_file_input(self, parent, title: str, var: tk.StringVar, ftypes: list):
+        row = ttk.Frame(parent, style="Card.TFrame")
+        row.pack(fill="x", pady=(0, 4))
+        ttk.Label(row, text=title, style="Header.TLabel").pack(anchor="w", pady=(0, 2))
+
+        in_row = ttk.Frame(row, style="Card.TFrame")
+        in_row.pack(fill="x")
+        ttk.Entry(in_row, textvariable=var, font=("Segoe UI", 9)).pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        def pick():
+            chosen = filedialog.askopenfilename(filetypes=ftypes)
+            if chosen:
+                var.set(chosen)
+
+        ttk.Button(in_row, text="Auswählen...", style="Secondary.TButton", command=pick).pack(side="left")
+
+    def _browse_depot(self):
+        f = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv"), ("All", "*.*")])
+        if f:
+            self.depot_file_var.set(f)
+
+    def _bind_setting(self, key: str, default: str) -> tk.StringVar:
+        val = self.db.get_setting(key, default)
+        v = tk.StringVar(value=val)
+        v.trace_add("write", lambda *_: self.db.set_setting(key, v.get()))
+        return v
+
+    def _bind_setting_bool(self, key: str, default: bool) -> tk.BooleanVar:
+        val = self.db.get_setting(key, str(default)) == "True"
+        v = tk.BooleanVar(value=val)
+        v.trace_add("write", lambda *_: self.db.set_setting(key, str(v.get())))
+        return v
+
+    def _check_file(self, path: str) -> bool:
+        if not path or not os.path.isfile(path):
+            messagebox.showwarning("Datei fehlt", "Bitte wählen Sie eine gültige Eingabedatei aus.")
+            return False
+        return True
+
+    def _async_task(self, task):
+        def runner():
+            try:
+                task()
+            except Exception as e:
+                print(f"Fehler: {e}")
+                messagebox.showerror("Verarbeitungsfehler", f"Ein Fehler ist aufgetreten:\n{e}")
+
+        threading.Thread(target=runner, daemon=True).start()
+
+    def _rollback(self, is_sales: bool):
+        label = "Sales (Verkäufe)" if is_sales else "Purchases (Einkäufe)"
+        message = f"Letzten Batch für {label} aus der lokalen Datenbank (Tracking-Historie) entfernen?"
+        if is_sales:
+            message += "\n\nACHTUNG: Die Depot-CSV-Datei wird nicht zurückgesetzt."
+        if messagebox.askyesno("Ja", message):
+            self.db.delete_last_processed(is_sales=is_sales)
+
+    def _clear_log(self):
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.configure(state="disabled")
+
+
+if __name__ == "__main__":
+    app = ModernImportGUI()
+    app.mainloop()
