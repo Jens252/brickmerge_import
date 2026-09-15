@@ -339,26 +339,26 @@ class ModernImportGUI(tk.Tk):
 
     def _tab_bricklink_sales(self):
         tab = ttk.Frame(self.notebook, style="Card.TFrame", padding=16)
-        self.notebook.add(tab, text="Bricklink Verkäufe")
+        self.notebook.add(tab, text="BrickLink Verkäufe")
 
         file_var = self._bind_setting("bl_sales_file", "")
         agg_var = self._bind_setting_bool("bl_agg_sales", True)
 
-        self._render_file_input(tab, "Bricklink Orders Received Download (CSV):", file_var, [("CSV Files", "*.csv")])
+        self._render_file_input(tab, "BrickLink Orders Received Download (CSV):", file_var, [("CSV Files", "*.csv")])
 
         # Detail items banner note
         info_box = ttk.Frame(tab, style="Card.TFrame")
         info_box.pack(fill="x", pady=(4, 6))
         lbl_hint = ttk.Label(
             info_box,
-            text="⚠️ Wichtig: Beim Bricklink-Download 'Include detail items' aktivieren!",
+            text="⚠️ Wichtig: Beim BrickLink-Download 'Include detail items' aktivieren!",
             foreground="#b45309",
             font=("Segoe UI", 9, "bold")
         )
         lbl_hint.pack(anchor="w")
         ToolTip(
             lbl_hint,
-            "Wird der Haken bei 'Include detail items' beim Exportieren auf Bricklink nicht gesetzt, "
+            "Wird der Haken bei 'Include detail items' beim Exportieren auf BrickLink nicht gesetzt, "
             "fehlen alle Artikelzeilen. Der Import kann dann keine Verkäufe erfassen."
         )
 
@@ -385,18 +385,22 @@ class ModernImportGUI(tk.Tk):
             )
             self._async_task(lambda: imp.import_sales(path))
 
-        ttk.Button(tab, text="Bricklink Verkäufe importieren", style="Primary.TButton", command=execute).pack(anchor="e")
+        ttk.Button(tab, text="BrickLink Verkäufe importieren", style="Primary.TButton", command=execute).pack(anchor="e")
 
     def _tab_settings(self):
+        """Constructs the settings tab for fee rates, shipping estimates, and identifier mappings."""
         tab = ttk.Frame(self.notebook, style="Card.TFrame", padding=16)
         self.notebook.add(tab, text="⚙️ Einstellungen & Mappings")
 
-        # Top half: Shipping & Fees
+        # Top half: Shipping & Fees configuration
         config_frame = ttk.Frame(tab, style="Card.TFrame")
         config_frame.pack(fill="x", pady=(0, 12))
 
-        ttk.Label(config_frame, text="Standard-Gebühren & Gemeinsame Versandkostenschätzung",
-                  style="Header.TLabel").pack(anchor="w", pady=(0, 6))
+        ttk.Label(
+            config_frame,
+            text="Standard-Gebühren & Gemeinsame Versandkostenschätzung",
+            style="Header.TLabel"
+        ).pack(anchor="w", pady=(0, 6))
 
         grid_box = ttk.Frame(config_frame, style="Card.TFrame")
         grid_box.pack(fill="x")
@@ -410,11 +414,11 @@ class ModernImportGUI(tk.Tk):
              "Für Schätzung Versandkosten (Amazon & eBay): Wird bei eBay nur berücksichtigt, wenn kostenloser Versand vorliegt (bzw. die Zusatzoption aktiv ist)."),
             ("ebay_fee_percent", "eBay Verkaufsgebühr (netto %):", "12.0", "Reguläre Verkaufsgebühr bei eBay."),
             ("ebay_ad_percent", "eBay Anzeigen (netto %):", "2.0", "Zuschlag für eBay-Anzeigenverkäufe."),
-            ("bl_fee_percent", "Bricklink Gebühr (brutto %):", "3.0", "Reguläre Verkaufsgebühr auf Bricklink."),
+            ("bl_fee_percent", "BrickLink Gebühr (brutto %):", "3.0", "Reguläre Verkaufsgebühr auf BrickLink."),
             ("bl_paypal_fee_percent", "PayPal Kosten (brutto %):", "2.0",
-             "Nur den Anteil eingeben, der NICHT bereits durch die Bricklink Handling Fee abgedeckt ist."),
+             "Nur den Anteil eingeben, der NICHT bereits durch die BrickLink Handling Fee abgedeckt ist."),
             ("bl_stripe_fee_percent", "Stripe Kosten (brutto %):", "2.0",
-             "Nur den Anteil eingeben, der NICHT bereits durch die Bricklink Handling Fee abgedeckt ist."),
+             "Nur den Anteil eingeben, der NICHT bereits durch die BrickLink Handling Fee abgedeckt ist."),
         ]
 
         for i, (key, label_text, default_val, tip_text) in enumerate(specs):
@@ -433,19 +437,27 @@ class ModernImportGUI(tk.Tk):
             field_entries[key] = v
 
         def save_conf():
+            """Persists updated fee and shipping estimates to the database."""
             for k, var in field_entries.items():
                 self.db.set_setting(k, var.get().strip().replace(',', '.'))
             messagebox.showinfo("Gespeichert", "Versand- und Gebührensätze wurden in der Datenbank gespeichert.")
 
-        ttk.Button(config_frame, text="Gebühren & Versand speichern", style="Secondary.TButton",
-                   command=save_conf).pack(anchor="e", pady=(8, 0))
+        ttk.Button(
+            config_frame,
+            text="Gebühren & Versand speichern",
+            style="Secondary.TButton",
+            command=save_conf
+        ).pack(anchor="e", pady=(8, 0))
 
         # Bottom half: Mappings Treeview
         map_card = ttk.Frame(tab, style="Card.TFrame")
         map_card.pack(fill="both", expand=True, pady=(6, 0))
 
-        ttk.Label(map_card, text="Manuelle Set-Zuordnungen (ASIN & eBay Artikel-Nr. ➔ Lego Set)",
-                  style="Header.TLabel").pack(anchor="w", pady=(0, 6))
+        ttk.Label(
+            map_card,
+            text="Manuelle Set-Zuordnungen (ASIN & eBay Artikel-Nr. & BrickLink-Nr. ➔ brickmerge)",
+            style="Header.TLabel"
+        ).pack(anchor="w", pady=(0, 6))
 
         tree_split = ttk.Frame(map_card, style="Card.TFrame")
         tree_split.pack(fill="both", expand=True)
@@ -453,7 +465,7 @@ class ModernImportGUI(tk.Tk):
         cols = ("platform", "identifier", "set_number", "note")
         tree = ttk.Treeview(tree_split, columns=cols, show="headings", height=6)
         tree.heading("platform", text="Plattform")
-        tree.heading("identifier", text="Identifier (ASIN / eBay Nr.)")
+        tree.heading("identifier", text="Identifier (ASIN, eBay Nr., etc.)")
         tree.heading("set_number", text="Lego Set-Nummer")
         tree.heading("note", text="Bezeichnung / Notiz")
 
@@ -468,6 +480,7 @@ class ModernImportGUI(tk.Tk):
         sb.pack(side="left", fill="y")
 
         def reload_tree():
+            """Refreshes the mapping table from SQLite."""
             for itm in tree.get_children():
                 tree.delete(itm)
             for m in self.db.get_all_mappings():
@@ -479,26 +492,71 @@ class ModernImportGUI(tk.Tk):
         side = ttk.Frame(tree_split, style="Card.TFrame", padding=(12, 0, 0, 0))
         side.pack(side="right", fill="y")
 
-        p_var = tk.StringVar(value="ASIN")
+        p_var = tk.StringVar(value="BrickLink")
         i_var = tk.StringVar()
         s_var = tk.StringVar()
         n_var = tk.StringVar()
 
         ttk.Label(side, text="Plattform:").pack(anchor="w")
-        ttk.Combobox(side, textvariable=p_var, values=["Amazon", "eBay"], state="readonly", width=15).pack(anchor="w",
-                                                                                                         pady=(0, 4))
+        combo_p = ttk.Combobox(
+            side,
+            textvariable=p_var,
+            values=["BrickLink", "eBay", "Amazon"],
+            state="readonly",
+            width=17
+        )
+        combo_p.pack(anchor="w", pady=(0, 4))
+
         ttk.Label(side, text="Identifier:").pack(anchor="w")
-        ttk.Entry(side, textvariable=i_var, width=17).pack(anchor="w", pady=(0, 4))
-        ttk.Label(side, text="Set-Nr (z.B. 71048-12):").pack(anchor="w")
-        ttk.Entry(side, textvariable=s_var, width=17).pack(anchor="w", pady=(0, 4))
+        ttk.Entry(side, textvariable=i_var, width=19).pack(anchor="w", pady=(0, 2))
+
+        # Dynamic contextual hint for platform identifier conventions
+        lbl_hint = ttk.Label(side, text="", font=("Segoe UI", 7), wraplength=145)
+        lbl_hint.pack(anchor="w", pady=(0, 4))
+
+        def update_hint(*_):
+            """Updates the identifier hint based on the selected platform."""
+            plat = p_var.get()
+            if plat == "BrickLink":
+                lbl_hint.config(
+                    text="Hinweis: Sets immer inkl. Suffix angeben (z. B. 6533318-1)",
+                    foreground="#d97706"
+                )
+            elif plat == "eBay":
+                lbl_hint.config(
+                    text="eBay Artikelnummer (12-stellig) oder Bestandseinheit (SKU)",
+                    foreground="#64748b"
+                )
+            else:
+                lbl_hint.config(
+                    text="ASIN (10-stellig, z. B. B00...)",
+                    foreground="#64748b"
+                )
+
+        combo_p.bind("<<ComboboxSelected>>", update_hint)
+        update_hint()
+
+        ttk.Label(side, text="Set-Nr (z. B. 71048-36):").pack(anchor="w")
+        ttk.Entry(side, textvariable=s_var, width=19).pack(anchor="w", pady=(0, 4))
         ttk.Label(side, text="Notiz:").pack(anchor="w")
-        ttk.Entry(side, textvariable=n_var, width=17).pack(anchor="w", pady=(0, 8))
+        ttk.Entry(side, textvariable=n_var, width=19).pack(anchor="w", pady=(0, 8))
 
         def add_item():
+            """Validates inputs and saves or updates the custom mapping."""
             p, _i, s, n = p_var.get().strip(), i_var.get().strip(), s_var.get().strip(), n_var.get().strip()
             if not _i or not s:
                 messagebox.showwarning("Fehlende Werte", "Identifier und Set-Nummer sind Pflichtfelder.")
                 return
+
+            # Warn user if they forgot the typical BrickLink set suffix
+            if p == "BrickLink" and _i.isdigit():
+                if not messagebox.askyesno(
+                        "Suffix fehlt möglicherweise",
+                        f"'{_i}' enthält kein Suffix wie '-1'.\n\n"
+                        "Möchtest du die Zuordnung trotzdem genau so speichern?"
+                ):
+                    return
+
             self.db.set_mapping(p, _i, s, n)
             reload_tree()
             i_var.set("")
@@ -506,6 +564,7 @@ class ModernImportGUI(tk.Tk):
             n_var.set("")
 
         def delete_item():
+            """Removes the selected mapping row from the database and UI."""
             sel = tree.selection()
             if not sel:
                 return
@@ -515,6 +574,7 @@ class ModernImportGUI(tk.Tk):
                 reload_tree()
 
         def on_select(e):
+            """Populates input fields when a table entry is clicked."""
             sel = tree.selection()
             if sel:
                 _v = tree.item(sel[0], "values")
@@ -522,12 +582,12 @@ class ModernImportGUI(tk.Tk):
                 i_var.set(_v[1])
                 s_var.set(_v[2])
                 n_var.set(_v[3])
+                update_hint()
 
         tree.bind("<<TreeviewSelect>>", on_select)
 
         ttk.Button(side, text="Zuordnung speichern", style="Primary.TButton", command=add_item).pack(fill="x", pady=2)
-        ttk.Button(side, text="Ausgewählte löschen", style="Secondary.TButton", command=delete_item).pack(fill="x",
-                                                                                                          pady=2)
+        ttk.Button(side, text="Ausgewählte löschen", style="Secondary.TButton", command=delete_item).pack(fill="x", pady=2)
 
     # ---------------- HELPERS ----------------
 
@@ -581,7 +641,7 @@ class ModernImportGUI(tk.Tk):
 
     def _check_file(self, path: str) -> bool:
         if not path or not os.path.isfile(path):
-            messagebox.showwarning("Datei fehlt", "Bitte wählen Sie eine gültige Eingabedatei aus.")
+            messagebox.showwarning("Datei fehlt", "Bitte wähle eine gültige Eingabedatei aus.")
             return False
         return True
 

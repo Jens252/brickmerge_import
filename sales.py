@@ -53,6 +53,7 @@ class SalesImporter:
             'artikleNo': df['set_identifier'].map(lambda x: str(x) if pd.notna(x) and '-' in str(x) else None),
             'sale_date': df['sale_date'].dt.strftime('%d.%m.%Y'),
             'sale_price': df['sale_price'].round(2),
+            'buy_price': df['buy_price'],
             'qty': df['quantity'].astype(int),
             'fees': df['sales_cost'].round(2),
             'channel': df['channel'],
@@ -60,7 +61,10 @@ class SalesImporter:
         })
 
         if self.depot_export_file:
-            export_df['buy_price'] = self.process_sales(export_df).round(2)
+            if self.ek_calculation_only:
+                export_df['buy_price'] = export_df['buy_price'].fillna(self.process_sales(export_df)).round(2)
+            else:
+                export_df['buy_price'] = self.process_sales(export_df).fillna(export_df['buy_price']).round(2)
 
         timestamp_min = sales['sale_date'].min().date().isoformat()
         timestamp_max = sales['sale_date'].max().date().isoformat()

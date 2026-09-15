@@ -34,7 +34,7 @@ class BricklinkSalesImporter(SalesImporter):
                                  index_col=False,
                                  on_bad_lines='skip',
                                  dtype={'Order ID': str, 'Base Currency': str, 'Total Items': float,
-                                        'Order Status': str, 'Pmt Method': str, 'Condition': str,
+                                        'Order Status': str, 'Pmt Method': str, 'Condition': str, 'Qty': float,
                                         'Sub-Condition': str, 'Item Type': str, 'Item Number': str},
                                  converters={
                                      'Credit': self._parse_currency,
@@ -66,12 +66,12 @@ class BricklinkSalesImporter(SalesImporter):
         mask_type = raw_df['Item Type'].isin(['Set', 'Gear'])
         items = raw_df[mask_shipped & mask_type].copy()
         if items.empty:
-            print("Fehler: Keine Artikelzeilen gefunden. Wurde beim Bricklink-Export 'Include detail items' aktiviert?")
+            print("Fehler: Keine Artikelzeilen gefunden. Wurde beim BrickLink-Export 'Include detail items' aktiviert?")
             return None
 
         new_items = self.db.filter_new_sales(items, 'Bricklink', 'Order ID', 'Item Number')
         if new_items.empty:
-            print("No new Bricklink sales found.")
+            print("No new BrickLink sales found.")
             return None
 
         if not ignore_discounts:
@@ -87,9 +87,12 @@ class BricklinkSalesImporter(SalesImporter):
 
         new_items['sales_cost'] = new_items.apply(
             lambda row: self.get_fees(row['Pmt Method'], row['sale_price'] * row['Qty']), axis=1)
+
+        new_items['set_identifier'] = new_items['Item Number'].map(
+            lambda x: self.db.get_mapped_set_number('BrickLink', x) or x)
+
         new_items.rename(columns={'Batch Date': 'sale_date',
                                   'Qty': 'quantity',
-                                  'Item Number': 'set_identifier',
                                   'My Cost': 'buy_price'}, inplace=True)
 
         import_df = self.export_sales(new_items, 'Bricklink', os.path.dirname(os.path.abspath(csv_filepath)))
