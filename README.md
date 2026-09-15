@@ -6,21 +6,21 @@ Desktop-Anwendung zur automatisierten Verarbeitung, Bereinigung und Verrechnung 
 
 ## Funktionen
 
-### Einkaufe Importieren**: ###
+### Einkaufe Importieren: ###
 * **Amazon Buisness**: Verarbeitet Bestellberichte (`Orders report`), filtert Duplikate und exportiert Brickmerge-kompatible CSV-Dateien.
 
-### Verkäufe Importieren**: ###
+### Verkäufe Importieren: ###
 * Import von **Amazon**, **eBay** und **BrickLink** Verkäufen über die Verkaufsberichte
 * Zuordnung über SKUs und Setnummern im Titel bzw. BrickLink Item No., sowie manuelle Zuweisungen
 * Berechnung der Verkaufsgebühren und Schätzung der Versandkosten
 * Aggregation ähnlicher Verkäufe eines Sets im selben Monat.
 
-### Depot-Verrechnung & Margen-Kalkulation**: ###
+### Depot-Verrechnung & Margen-Kalkulation: ###
 * **FIFO-Abbau**: Bestandsabzug und Ermittlung des tatsächlichen Einkaufspreises (EK) chronologisch nach Kaufdatum.
 * **Reiner Berechnungsmodus**: Ermittlung des Durchschnitts-EKs aus einer Depot-Export CSV für nachträglich dokumentierte Verkäufe.
 
 
-### Tracking & Duplikatschutz**: ###
+### Tracking & Duplikatschutz: ###
 * Lokale SQLite-Datenbank (`import_history.db`) zur Filterung bereits importierter Bestell- und Zahlungs-IDs.
 
 ---
