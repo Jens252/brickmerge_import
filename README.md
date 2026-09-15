@@ -1,4 +1,4 @@
-# Marketplace Order & Sales Importer
+# Brickmerge Depot Importer für Marktplatz Verkäufe und Amazon Buisness Einkäufe
 
 Desktop-Anwendung zur automatisierten Verarbeitung, Bereinigung und Verrechnung von Bestell- und Verkaufsberichten von **Amazon**, **eBay** und **BrickLink** mit Bestands- und Einkaufspreisabgleich über Brickmerge-Depot CSV-Exporte.
 
