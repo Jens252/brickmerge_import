@@ -128,7 +128,8 @@ class SalesImporter:
                     avg_ek = np.nan
                 ek_list.append(round(avg_ek, 2))
             else:
-                stock_indices = bm_depot_df[mask].sort_values('buy_date').index
+                stock_indices = bm_depot_df[mask].sort_values(by=['buy_date', 'buy_price'], ascending=[True, True],
+                                                              na_position='first').index
 
                 qty_needed = int(row['qty'])
                 total_ek = 0.0
