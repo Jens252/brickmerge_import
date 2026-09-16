@@ -60,7 +60,8 @@ class AmazonPurchasesImporter:
 
         # Drop lines without Payment Reference (unshipped, pending or cancelled orders)
         amz_report = amz_report.dropna(subset=['Payment reference ID']).copy()
-        amz_report = amz_report.loc[amz_report['Payment reference ID'].str.strip() != '']
+        amz_report = amz_report.loc[
+            (amz_report['Payment reference ID'].str.strip() != '') & (amz_report['Item Quantity'] > 0)]
         amz_report = self.fix_order_report_duplicates(amz_report)
 
         # Import LEGO manufacturer lines only
@@ -91,7 +92,7 @@ class AmazonPurchasesImporter:
             new_orders = new_orders[received_mask]
 
         if new_orders.empty:
-            print("No new paid purchase deliveries to import.")
+            print("No new purchase lines to import.")
             return None
 
         # Consolidate split shipments of the same ASIN within the same order
