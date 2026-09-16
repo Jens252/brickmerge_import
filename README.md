@@ -1,27 +1,28 @@
 # Brickmerge Depot Importer für Marktplatz Verkäufe und Amazon Buisness Einkäufe
 
-Desktop-Anwendung zur automatisierten Verarbeitung, Bereinigung und Verrechnung von Bestell- und Verkaufsberichten von **Amazon**, **eBay** und **BrickLink** mit Bestands- und Einkaufspreisabgleich über Brickmerge-Depot CSV-Exporte.
+Desktop-Anwendung zur automatisierten Generierung von Import CSV-Dateien für brickmerge Depots.
 
 ---
 
 ## Funktionen
 
 ### Einkaufe Importieren: ###
-* **Amazon Buisness**: Verarbeitet Bestellberichte (`Orders report`), filtert Duplikate und exportiert Brickmerge-kompatible CSV-Dateien.
+* **Amazon Buisness**: Verarbeitet Orders Reports, korrigiert mehrfache Einträge und exportiert brickmerge-kompatible CSV-Dateien.
 
 ### Verkäufe Importieren: ###
-* Import von **Amazon**, **eBay** und **BrickLink** Verkäufen über die Verkaufsberichte
+* Generiert CSV-Dateien zum Import im brickmerge Depot für Verkäufe über **Amazon**, **eBay** und **BrickLink** aus den jeweiligen Verkaufsberichten
 * Zuordnung über SKUs und Setnummern im Titel bzw. BrickLink Item No., sowie manuelle Zuweisungen
 * Berechnung der Verkaufsgebühren und Schätzung der Versandkosten
 * Aggregation ähnlicher Verkäufe eines Sets im selben Monat.
 
 ### Depot-Verrechnung & Margen-Kalkulation: ###
-* **FIFO-Abbau**: Bestandsabzug und Ermittlung des tatsächlichen Einkaufspreises (EK) chronologisch nach Kaufdatum.
-* **Reiner Berechnungsmodus**: Ermittlung des Durchschnitts-EKs aus einer Depot-Export CSV für nachträglich dokumentierte Verkäufe.
+* Über brickmerge-Depot CSV-Export Datei.
+* **FIFO-Abbau**: Bestandsabzug und Ermittlung des tatsächlichen Einkaufspreises (EK) chronologisch nach Kaufdatum. Die aktualisierte Datei kann dann genutzt werden, um den Bestand im brickmerge Depot zu aktualisieren.
+* **Reiner Berechnungsmodus**: Verwendung des Durchschnitts-EKs aus einer Depot-Export CSV für nachträglich dokumentierte Verkäufe.
 
 
 ### Tracking & Duplikatschutz: ###
-* Lokale SQLite-Datenbank (`import_history.db`) zur Filterung bereits importierter Bestell- und Zahlungs-IDs.
+* Lokale SQLite-Datenbank zur Filterung bereits importierter Positionen.
 
 ---
 
