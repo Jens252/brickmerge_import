@@ -455,7 +455,7 @@ class ModernImportGUI(tk.Tk):
 
         ttk.Label(
             map_card,
-            text="Manuelle Set-Zuordnungen (ASIN & eBay Artikel-Nr. & BrickLink-Nr. ➔ brickmerge)",
+            text="Manuelle Set-Zuordnungen: ASIN / eBay Artikel-Nr. oder SKU / BrickLink Item-Nr. ➔ brickmerge",
             style="Header.TLabel"
         ).pack(anchor="w", pady=(0, 6))
 
@@ -466,13 +466,13 @@ class ModernImportGUI(tk.Tk):
         tree = ttk.Treeview(tree_split, columns=cols, show="headings", height=6)
         tree.heading("platform", text="Plattform")
         tree.heading("identifier", text="Identifier (ASIN, eBay Nr., etc.)")
-        tree.heading("set_number", text="Lego Set-Nummer")
+        tree.heading("set_number", text="Brickmerge Set-Nummer")
         tree.heading("note", text="Bezeichnung / Notiz")
 
-        tree.column("platform", width=90, anchor="center")
-        tree.column("identifier", width=180)
-        tree.column("set_number", width=140)
-        tree.column("note", width=220)
+        tree.column("platform", width=80, anchor="center")
+        tree.column("identifier", width=190)
+        tree.column("set_number", width=160)
+        tree.column("note", width=200)
 
         tree.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(tree_split, orient="vertical", command=tree.yview)
