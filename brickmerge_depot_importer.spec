@@ -8,6 +8,7 @@ local_imports = [
     'ebay_sales',
     'bricklink_sales'
     'eu_countries',
+    'set_number_parser',
 ]
 
 a = Analysis(
