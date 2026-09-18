@@ -271,3 +271,7 @@ class DatabaseMigration(Database):
         except Exception as e:
             self.conn.execute("DETACH DATABASE old_db;")
             print(f"Error during migration: {e}")
+
+
+if __name__ == "__main__":
+    db = DatabaseMigration()

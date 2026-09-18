@@ -27,7 +27,6 @@ class SalesImporter:
 
         # Ensure datetime type for consistent formatting and grouping
         sales['sale_date'] = pd.to_datetime(sales['sale_date'])
-        sales['set_identifier'] = sales['set_identifier'].map(self.map_bricklink_item_number)
 
         if self.aggregate_sales:
             sales['groupby_price'] = sales['sale_price'].map(int)
@@ -164,50 +163,6 @@ class SalesImporter:
             bm_depot_df.to_csv(self.depot_export_file, sep=';', decimal=',', index=False)
 
         return pd.Series(ek_list, index=sales.index)
-
-    @staticmethod
-    def get_set_number_from_title(title: str) -> str | None:
-        """
-        Extracts Lego set numbers (5+ digits) from product titles.
-        Returns None if no or multiple numbers are found.
-        """
-        if not isinstance(title, str) or 'minifiguren serie' in title.lower():
-            return None
-
-        matches = re.findall(r'\b\d{5,}(?:-\d+)?\b', title)
-        if len(matches) == 1:
-            return matches[0]
-
-        five_digit_matches = [m for m in matches if len(m.split('-')[0]) == 5]
-        if len(five_digit_matches) == 1:
-            return five_digit_matches[0]
-
-        print(f"Set number could not be resolved from title: {title}")
-        return None
-
-    @staticmethod
-    def map_bricklink_item_number(item_number: str | None) -> str | None:
-        """
-        Convert Bricklink item numbers to a brickmerge format where different.
-        """
-        if not item_number or not isinstance(item_number, str):
-            return item_number
-
-        item_str = item_number.strip()
-
-        # Split item number into base and suffix
-        parts = item_str.split('-')
-        if len(parts) == 2:
-            base, suffix = parts[0], parts[1]
-
-            # Convert format for CMF complete series or boxes
-            if len(base) == 5 and base.startswith('710'):
-                if suffix == '2':
-                    return f"{base}-12"  # complete series
-                elif suffix == '3':
-                    return f"{base}-36"  # box of 36
-
-        return item_str
 
     @staticmethod
     def _parse_currency(val) -> float:

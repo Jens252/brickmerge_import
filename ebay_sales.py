@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from database import Database
 from sales import SalesImporter
+from set_number_parser import SetNumberParser
 
 
 class EbaySalesImporter(SalesImporter):
@@ -30,6 +31,7 @@ class EbaySalesImporter(SalesImporter):
         usecols = ['Verkaufsprotokollnummer', 'Bestellnummer', 'Artikelnummer', 'Angebotstitel', 'Bestandseinheit',
                    'Verkauft über Anzeigen', 'Anzahl', 'Verkauft für', 'Verpackung und Versand', 'Inklusive MwSt.-Satz',
                    'Gesamtbetrag', 'Verkauft am', 'Verschickt am - Datum']
+        output_directory = os.path.dirname(os.path.abspath(csv_filepath))
         try:
             df = pd.read_csv(csv_filepath,
                              sep=';',
@@ -67,8 +69,9 @@ class EbaySalesImporter(SalesImporter):
 
         # Calculate per-line ship cost and filter data
         df['Verpackung und Versand'] = (df['Verpackung und Versand'] / df['Anzahl'].fillna(1)).ffill()
+        df['Gesamtbetrag'] = df['Gesamtbetrag'].ffill()
         items = df[df['Verschickt am - Datum'].notna() & df['Artikelnummer'].notna() & (
-                df['Artikelnummer'].str.strip() != '')].copy()
+                df['Artikelnummer'].str.strip() != '') & (df['Gesamtbetrag'] != 0.0)].copy()
 
         if items.empty:
             print("No line items found in eBay report.")
@@ -109,6 +112,9 @@ class EbaySalesImporter(SalesImporter):
         ).round(2)
 
         # Find Set numbers for eBay items
+        sku_template = self.db.get_setting("sku_template", "{SET}[-{WERT,1,4}]")
+        parser = SetNumberParser(sku_template)
+
         def _resolve_ebay_identifier(row) -> str | float:
             # 1. Check für custom eBay item number mapping
             item_no = str(row['Artikelnummer']).strip() if pd.notna(row['Artikelnummer']) else None
@@ -125,17 +131,21 @@ class EbaySalesImporter(SalesImporter):
                     return mapped
 
             # 3. Return sku if no mapping found
-            return sku or np.nan
+            return parser.get_set_number_from_sku(sku) or np.nan
 
         new_items['set_identifier'] = new_items.apply(_resolve_ebay_identifier, axis=1)
 
         # Fallback to Title Regex Extraction
-        missing = new_items['set_identifier'].isna() | (new_items['set_identifier'] == '')
+        missing = new_items['set_identifier'].isna()
         if missing.any():
             new_items.loc[missing, 'set_identifier'] = new_items.loc[missing, 'Angebotstitel'].map(
-                self.get_set_number_from_title
+                parser.get_set_number_from_title
             )
+        if new_items['set_identifier'].isna().any():
+            missing_identifiers = new_items[new_items['set_identifier'].isna()]
+            print("Notice: Sales without assigned set number exported to 'ebay_missing_set_numbers.csv'.")
+            missing_identifiers.to_csv(os.path.join(output_directory, "ebay_missing_set_numbers.csv"))
 
-        import_df = self.export_sales(new_items, 'eBay', os.path.dirname(os.path.abspath(csv_filepath)))
+        import_df = self.export_sales(new_items, 'eBay', output_directory)
         self.db.record_sales(new_items, 'eBay', 'Bestellnummer', 'Artikelnummer')
         return import_df

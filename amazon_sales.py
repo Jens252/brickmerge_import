@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from database import Database
 from sales import SalesImporter
+from set_number_parser import SetNumberParser
 
 
 class AmazonSalesImporter(SalesImporter):
@@ -16,39 +17,67 @@ class AmazonSalesImporter(SalesImporter):
                          ek_calculation_only)
         self.db = db
 
-    def import_sales(self, amazon_sales_report_filename: str) -> pd.DataFrame | None:
-        """Processes Amazon seller report and exports in Brickmerge sales format."""
-        usecols = [
-            'amazon-order-id', 'purchase-date', 'order-status', 'fulfillment-channel', 'product-name', 'ship-country',
-            'sku', 'asin', 'quantity', 'item-price', 'shipping-price', 'item-promotion-discount', 'ship-promotion-discount'
-        ]
-        output_directory = os.path.dirname(os.path.abspath(amazon_sales_report_filename))
-        try:
-            amz_report = pd.read_csv(
-                amazon_sales_report_filename,
-                sep='\t',
-                on_bad_lines='skip',
-                dtype={'sku': str},
-                parse_dates=['purchase-date'],
-                usecols=lambda c: c in usecols
-            )
-        except FileNotFoundError:
-            print(f"Error: File {amazon_sales_report_filename} not found.")
+    def import_sales(self, filenames: str | list[str]) -> pd.DataFrame | None:
+        """Processes one or multiple Amazon seller reports and exports in Brickmerge sales format."""
+        file_list = [filenames] if isinstance(filenames, str) else filenames
+
+        if not file_list:
+            print("Fehler: Keine Dateien zum Importieren übergeben.")
             return None
 
+        usecols = [
+            'amazon-order-id', 'purchase-date', 'order-status', 'fulfillment-channel', 'sales-channel', 'product-name',
+            'ship-country', 'sku', 'asin', 'quantity', 'item-price', 'shipping-price', 'item-promotion-discount',
+            'ship-promotion-discount'
+        ]
+        output_directory = os.path.dirname(os.path.abspath(file_list[0]))
+        loaded_dfs: list[pd.DataFrame] = []
+
+        for fpath in file_list:
+            if not os.path.isfile(fpath):
+                print(f"Error: File '{fpath}' not found.")
+                continue
+
+            try:
+                df = pd.read_csv(
+                    fpath,
+                    sep='\t',
+                    on_bad_lines='skip',
+                    dtype={'amazon-order-id': str, 'order-status': str, 'fulfillment-channel': str,
+                           'sales-channel': str, 'product-name': str, 'ship-country': str, 'sku': str, 'asin': str,
+                           'quantity': float, 'item-price': float, 'shipping-price': float,
+                           'item-promotion-discount': float, 'ship-promotion-discount': float},
+                    parse_dates=['purchase-date'],
+                    usecols=lambda c: c in usecols
+                )
+                loaded_dfs.append(df)
+            except Exception as e:
+                print(f"Fehler beim Einlesen von '{fpath}': {e}")
+
+        if not loaded_dfs:
+            print("Keine gültigen Amazon-Verkaufsberichte gefunden.")
+            return None
+
+        amz_report = pd.concat(loaded_dfs, ignore_index=True)
+        if len(file_list) > 1:
+            print(f"Kombinierte {len(loaded_dfs)} Verkaufsberichte ({len(amz_report)} Zeilen gesamt).")
+
         # Filter for shipped orders only
-        amz_report = amz_report[amz_report['order-status'] == 'Shipped']
+        amz_report = amz_report[
+            (amz_report['order-status'] == 'Shipped') & (amz_report['sales-channel'] != 'Non-Amazon')]
 
         new_orders = self.db.filter_new_sales(amz_report, 'Amazon', 'amazon-order-id', 'asin')
 
-        # Get set identifier from ASIN or product name
+        # Get set identifier from ASIN, SKU or product name
+        sku_template = self.db.get_setting("sku_template", "{SET}[-{WERT,1,4}]")
+        parser = SetNumberParser(sku_template)
         new_orders['set_identifier'] = new_orders['asin'].map(self.asin_to_set_number_fallback).fillna(
-            new_orders['sku'].map(lambda x: x if '-' not in x[:4] and x.count('-') < 2 else None)).fillna(
-            new_orders['product-name'].map(self.get_set_number_from_title))
+            new_orders['sku'].map(parser.get_set_number_from_sku)).fillna(
+            new_orders['product-name'].map(parser.get_set_number_from_title))
         if new_orders['set_identifier'].isna().any():
             missing_identifiers = new_orders[new_orders['set_identifier'].isna()]
-            print("Notice: Sales without set identifiers exported to 'missing_set_identifiers.csv'.")
-            missing_identifiers.to_csv(os.path.join(output_directory, "missing_set_identifiers.csv"), index=False)
+            print("Notice: Sales without assigned set number exported to 'amazon_missing_set_numbers.csv'.")
+            missing_identifiers.to_csv(os.path.join(output_directory, "amazon_missing_set_numbers.csv"))
         new_orders = new_orders[~new_orders['set_identifier'].isna()].copy()
 
         if new_orders.empty:

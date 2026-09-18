@@ -185,9 +185,10 @@ class AmazonPurchasesImporter:
                 if is_different_mask.any():
                     order_with_differences = payment_differences[is_different_mask].index
                     differences_mask = amazon_order_report['Order ID'].isin(order_with_differences) & mask_dup
-                    print("Warning: The following order lines might contain unresolved duplicates: \n",
-                          fixed_report.loc[
-                              differences_mask, ['Order ID', 'ASIN', 'Item Quantity', 'Item subtotal sum']].to_string())
+                    if differences_mask.any():
+                        print("Warning: The following order lines might contain unresolved duplicates: \n",
+                              fixed_report.loc[
+                                  differences_mask, ['Order ID', 'ASIN', 'Item Quantity', 'Item subtotal sum']].to_string())
                     print("Warning: Unresolved payment differences (might be Amazon Rewards Points discounts):\n",
                           payment_differences[is_different_mask].to_string())
 

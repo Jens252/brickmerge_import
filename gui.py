@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import sys
 import threading
 import tkinter as tk
@@ -10,6 +11,7 @@ from amazon_orders import AmazonPurchasesImporter
 from amazon_sales import AmazonSalesImporter
 from ebay_sales import EbaySalesImporter
 from bricklink_sales import BricklinkSalesImporter
+from set_number_parser import SetNumberParser
 
 
 class ToolTip:
@@ -48,17 +50,24 @@ class ToolTip:
 
 
 class TextRedirector(io.StringIO):
-    """Redirects stdout and stderr into a Tkinter console widget."""
+    """Redirects stdout and stderr safely into a Tkinter console widget."""
 
     def __init__(self, text_widget: tk.Text):
         super().__init__()
         self.text_widget = text_widget
 
     def write(self, string):
-        self.text_widget.configure(state="normal")
-        self.text_widget.insert(tk.END, string)
-        self.text_widget.see(tk.END)
-        self.text_widget.configure(state="disabled")
+        # Sicherstellen, dass das Widget im GUI-Mainthread aktualisiert wird
+        def _append():
+            try:
+                self.text_widget.configure(state="normal")
+                self.text_widget.insert(tk.END, string)
+                self.text_widget.see(tk.END)
+                self.text_widget.configure(state="disabled")
+            except (tk.TclError, RuntimeError):
+                pass
+
+        self.text_widget.after(0, _append)
 
     def flush(self):
         pass
@@ -271,17 +280,21 @@ class ModernImportGUI(tk.Tk):
         file_var = self._bind_setting("amz_sales_file", "")
         agg_var = self._bind_setting_bool("amz_agg_sales", True)
 
-        self._render_file_input(tab, "Amazon Bestellbericht (TXT / TSV):", file_var,
-                                [("Text Files", "*.txt"), ("TSV Files", "*.tsv"), ("All", "*.*")])
+        self._render_file_input(tab, "Amazon Bestellberichte (TXT / TSV):", file_var,
+                                [("Text Files", "*.txt"), ("TSV Files", "*.tsv"), ("All", "*.*")], multiple=True)
 
         row_opt = ttk.Frame(tab, style="Card.TFrame")
         row_opt.pack(fill="x", pady=(8, 12))
         self._add_aggregation_checkbox(row_opt, agg_var)
 
         def execute():
-            path = file_var.get().strip()
-            if not self._check_file(path):
+            raw_path = file_var.get().strip()
+            if not raw_path:
+                messagebox.showwarning("Datei fehlt", "Bitte wähle mindestens eine Eingabedatei aus.")
                 return
+
+            paths = [p.strip() for p in raw_path.split(";") if p.strip()]
+
             base_s = float(self.db.get_setting("shipping_base", "5.0"))
             pct_s = float(self.db.get_setting("shipping_percent", "3.0"))
             imp = AmazonSalesImporter(
@@ -290,7 +303,7 @@ class ModernImportGUI(tk.Tk):
                 shipping_cost_base=base_s, shipping_cost_percentage=pct_s,
                 ek_calculation_only=self.ek_only_var.get()
             )
-            self._async_task(lambda: imp.import_sales(path))
+            self._async_task(lambda: imp.import_sales(paths))
 
         ttk.Button(tab, text="Amazon Verkäufe importieren", style="Primary.TButton", command=execute).pack(anchor="e")
 
@@ -398,7 +411,7 @@ class ModernImportGUI(tk.Tk):
 
         ttk.Label(
             config_frame,
-            text="Standard-Gebühren & Gemeinsame Versandkostenschätzung",
+            text="Standard-Gebühren & Versandkostenschätzung",
             style="Header.TLabel"
         ).pack(anchor="w", pady=(0, 6))
 
@@ -442,12 +455,29 @@ class ModernImportGUI(tk.Tk):
                 self.db.set_setting(k, var.get().strip().replace(',', '.'))
             messagebox.showinfo("Gespeichert", "Versand- und Gebührensätze wurden in der Datenbank gespeichert.")
 
+        # Button-Leiste: SKU-Muster links/mittig, Speichern rechts
+        btn_bar = ttk.Frame(config_frame, style="Card.TFrame")
+        btn_bar.pack(fill="x", pady=(8, 0))
+
+        btn_sku = ttk.Button(
+            btn_bar,
+            text="⚙️ SKU-Erkennungsmuster (Amazon / eBay)...",
+            style="Secondary.TButton",
+            command=lambda: SkuSettingsDialog(self, self.db)
+        )
+        btn_sku.pack(side="left")
+        ToolTip(
+            btn_sku,
+            "Konfiguriere und teste das Template zur automatischen\n"
+            "Erkennung von Setnummern aus SKUs (z. B. {SET}[-{WERT,1,4}])."
+        )
+
         ttk.Button(
-            config_frame,
+            btn_bar,
             text="Gebühren & Versand speichern",
             style="Secondary.TButton",
             command=save_conf
-        ).pack(anchor="e", pady=(8, 0))
+        ).pack(side="right")
 
         # Bottom half: Mappings Treeview
         map_card = ttk.Frame(tab, style="Card.TFrame")
@@ -606,7 +636,7 @@ class ModernImportGUI(tk.Tk):
         )
         return chk
 
-    def _render_file_input(self, parent, title: str, var: tk.StringVar, ftypes: list):
+    def _render_file_input(self, parent, title: str, var: tk.StringVar, ftypes: list, multiple: bool = False,):
         row = ttk.Frame(parent, style="Card.TFrame")
         row.pack(fill="x", pady=(0, 4))
         ttk.Label(row, text=title, style="Header.TLabel").pack(anchor="w", pady=(0, 2))
@@ -616,9 +646,14 @@ class ModernImportGUI(tk.Tk):
         ttk.Entry(in_row, textvariable=var, font=("Segoe UI", 9)).pack(side="left", fill="x", expand=True, padx=(0, 6))
 
         def pick():
-            chosen = filedialog.askopenfilename(filetypes=ftypes)
-            if chosen:
-                var.set(chosen)
+            if multiple:
+                chosen = filedialog.askopenfilenames(filetypes=ftypes)
+                if chosen:
+                    var.set(";".join(chosen))
+            else:
+                chosen = filedialog.askopenfilename(filetypes=ftypes)
+                if chosen:
+                    var.set(chosen)
 
         ttk.Button(in_row, text="Auswählen...", style="Secondary.TButton", command=pick).pack(side="left")
 
@@ -667,6 +702,273 @@ class ModernImportGUI(tk.Tk):
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", tk.END)
         self.log_text.configure(state="disabled")
+
+
+class SkuSettingsDialog(tk.Toplevel):
+    """Modaler Konfigurations- und Testdialog für das SKU-Erkennungsmuster."""
+
+    def __init__(self, parent: tk.Tk | tk.Toplevel, db) -> None:
+        super().__init__(parent)
+        self.db = db
+        self.parent = parent
+        self.title("SKU-Erkennung konfigurieren")
+        self.resizable(False, False)
+        self.transient(parent)
+
+        # Sichere Presets ohne fehleranfällige Wildcard '*'
+        self.presets: dict[str, str] = {
+            "Standard: Optionales Suffix ({SET}[-{WERT,1,4}])": (
+                "{SET}[-{WERT,1,4}]"
+            ),
+            "Nur reine Ziffern ({SET}[-{ZAHL,1,2}])": "{SET}[-{ZAHL,1,2}]",
+            "Nur reiner Text ({SET}[-{TEXT,1,4}])": "{SET}[-{TEXT,1,4}]",
+            "3-Teilig ({SET}[-{ZAHL,1,1}][-{WERT,1,4}])": (
+                "{SET}[-{ZAHL,1,1}][-{WERT,1,4}]"
+            ),
+            "Exakt nur Setnummer ({SET})": "{SET}",
+            "Benutzerdefiniert": "",
+        }
+
+        self._updating_from_preset = False
+        self._build_ui()
+        self._center_window()
+        self.grab_set()
+
+        self.bind("<Escape>", lambda _: self.destroy())
+        self.bind("<Return>", lambda _: self._save_and_close())
+
+    def _build_ui(self) -> None:
+        main_frame = ttk.Frame(self, style="Card.TFrame", padding=20)
+        main_frame.pack(fill="both", expand=True)
+
+        current_val = self.db.get_setting("sku_template", "{SET}[-{WERT,1,4}]")
+        self.pattern_var = tk.StringVar(value=current_val)
+        self.preset_var = tk.StringVar(value="Benutzerdefiniert")
+
+        for name, tmpl in self.presets.items():
+            if tmpl == current_val:
+                self.preset_var.set(name)
+                break
+
+        # Header-Bereich
+        ttk.Label(
+            main_frame,
+            text="SKU-Erkennung (Amazon & eBay)",
+            style="Header.TLabel",
+        ).pack(anchor="w", pady=(0, 2))
+
+        ttk.Label(
+            main_frame,
+            text="Definiere das Schema, mit dem LEGO-Setnummern aus SKUs extrahiert werden.",
+            font=("Segoe UI", 9),
+            foreground="#64748b",
+        ).pack(anchor="w", pady=(0, 16))
+
+        # 1. Preset Dropdown
+        row_preset = ttk.Frame(main_frame, style="Card.TFrame")
+        row_preset.pack(fill="x", pady=(0, 8))
+        ttk.Label(
+            row_preset, text="Vorlage:", width=10, font=("Segoe UI", 9, "bold")
+        ).pack(side="left")
+
+        cb = ttk.Combobox(
+            row_preset,
+            textvariable=self.preset_var,
+            values=list(self.presets.keys()),
+            state="readonly",
+            width=42,
+        )
+        cb.pack(side="left", fill="x", expand=True)
+        cb.bind("<<ComboboxSelected>>", self._on_preset_selected)
+
+        # 2. Template Eingabezeile
+        row_tmpl = ttk.Frame(main_frame, style="Card.TFrame")
+        row_tmpl.pack(fill="x", pady=(0, 14))
+        ttk.Label(
+            row_tmpl, text="Muster:", width=10, font=("Segoe UI", 9, "bold")
+        ).pack(side="left")
+
+        ent_pattern = ttk.Entry(
+            row_tmpl, textvariable=self.pattern_var, width=42
+        )
+        ent_pattern.pack(side="left", fill="x", expand=True)
+        self.pattern_var.trace_add("write", self._on_pattern_edited)
+
+        # 3. Moderne Live-Vorschau Karte (Card-Stil statt LabelFrame)
+        preview_card = tk.Frame(
+            main_frame,
+            bg="#f8fafc",
+            highlightbackground="#e2e8f0",
+            highlightthickness=1,
+            padx=14,
+            pady=12,
+        )
+        preview_card.pack(fill="x", pady=(0, 14))
+
+        # Kopfzeile der Vorschau
+        preview_header = tk.Frame(preview_card, bg="#f8fafc")
+        preview_header.pack(fill="x", pady=(0, 8))
+
+        tk.Label(
+            preview_header,
+            text="LIVE-VORSCHAU",
+            font=("Segoe UI", 8, "bold"),
+            fg="#94a3b8",
+            bg="#f8fafc",
+        ).pack(side="left")
+
+        # Eingabe & Status-Badge
+        preview_body = tk.Frame(preview_card, bg="#f8fafc")
+        preview_body.pack(fill="x")
+
+        tk.Label(
+            preview_body,
+            text="Test-SKU:",
+            font=("Segoe UI", 9),
+            fg="#475569",
+            bg="#f8fafc",
+        ).pack(side="left", padx=(0, 8))
+
+        self.test_sku_var = tk.StringVar(value="75192-NEW")
+        ent_test = ttk.Entry(preview_body, textvariable=self.test_sku_var, width=18)
+        ent_test.pack(side="left", padx=(0, 12))
+        self.test_sku_var.trace_add("write", lambda *_: self._run_test())
+
+        # Status-Badge (Pille mit Hintergrundfarbe)
+        self.lbl_badge = tk.Label(
+            preview_body,
+            text="",
+            font=("Segoe UI", 9, "bold"),
+            padx=8,
+            pady=2,
+            bd=0,
+        )
+        self.lbl_badge.pack(side="left")
+
+        # 4. Syntax-Hinweise (Sauber strukturiert ohne Wildcard-Verleitung)
+        help_card = ttk.Frame(main_frame, style="Card.TFrame")
+        help_card.pack(fill="x", pady=(0, 18))
+
+        help_tokens = (
+            "• {SET} : 4–7 Ziffern (LEGO Set-Nummer)\n"
+            "• {WERT,min,max} : Alphanumerisch (z. B. 'NEW', '1', 'OVP')\n"
+            "• {ZAHL,min,max} : Nur Ziffern | {TEXT,min,max} : Nur Buchstaben\n"
+            "• [...] : Optionaler Bereich (z. B. '[-{WERT,1,4}]')"
+        )
+        ttk.Label(
+            help_card,
+            text=help_tokens,
+            font=("Segoe UI", 8),
+            foreground="#64748b",
+            justify="left",
+        ).pack(anchor="w")
+
+        # 5. Buttons
+        btn_box = ttk.Frame(main_frame, style="Card.TFrame")
+        btn_box.pack(fill="x")
+
+        ttk.Button(
+            btn_box,
+            text="Abbrechen",
+            style="Secondary.TButton",
+            command=self.destroy,
+        ).pack(side="right", padx=(8, 0))
+
+        ttk.Button(
+            btn_box,
+            text="Speichern",
+            style="Primary.TButton",
+            command=self._save_and_close,
+        ).pack(side="right")
+
+        self._run_test()
+
+    def _center_window(self) -> None:
+        self.update_idletasks()
+        w = self.winfo_reqwidth()
+        h = self.winfo_reqheight()
+
+        parent_x = self.parent.winfo_rootx()
+        parent_y = self.parent.winfo_rooty()
+        parent_w = self.parent.winfo_width()
+        parent_h = self.parent.winfo_height()
+
+        x = parent_x + max(0, (parent_w - w) // 2)
+        y = parent_y + max(0, (parent_h - h) // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _on_preset_selected(self, _event=None) -> None:
+        selected_template = self.presets.get(self.preset_var.get())
+        if selected_template:
+            self._updating_from_preset = True
+            self.pattern_var.set(selected_template)
+            self._updating_from_preset = False
+        self._run_test()
+
+    def _on_pattern_edited(self, *_) -> None:
+        if not self._updating_from_preset:
+            cur = self.pattern_var.get().strip()
+            match_found = False
+            for name, tmpl in self.presets.items():
+                if tmpl == cur and name != "Benutzerdefiniert":
+                    self.preset_var.set(name)
+                    match_found = True
+                    break
+            if not match_found:
+                self.preset_var.set("Benutzerdefiniert")
+
+        self._run_test()
+
+    def _run_test(self) -> None:
+        tmpl = self.pattern_var.get().strip()
+        sample = self.test_sku_var.get().strip()
+
+        if not tmpl or not sample:
+            self.lbl_badge.config(text="", bg="#f8fafc")
+            return
+
+        try:
+            parser = SetNumberParser(tmpl)
+            found = parser.get_set_number_from_sku(sample)
+            if found:
+                self.lbl_badge.config(
+                    text=f"✓ Erkannt: {found}",
+                    fg="#15803d",
+                    bg="#dcfce7",  # Subtiles Tailwind-Grün
+                )
+            else:
+                self.lbl_badge.config(
+                    text="✗ Kein Treffer",
+                    fg="#b91c1c",
+                    bg="#fee2e2",  # Subtiles Tailwind-Rot
+                )
+        except (re.error, ValueError):
+            self.lbl_badge.config(
+                text="! Ungültiges Muster",
+                fg="#b45309",
+                bg="#fef3c7",  # Subtiles Tailwind-Bernstein
+            )
+
+    def _save_and_close(self) -> None:
+        tmpl = self.pattern_var.get().strip()
+        if not tmpl:
+            messagebox.showwarning(
+                "Leeres Muster",
+                "Das SKU-Muster darf nicht leer sein.",
+                parent=self,
+            )
+            return
+
+        try:
+            SetNumberParser.compile_sku_template(tmpl)
+            self.db.set_setting("sku_template", tmpl)
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror(
+                "Ungültiges Muster",
+                f"Das angegebene Muster konnte nicht kompiliert werden:\n{e}",
+                parent=self,
+            )
 
 
 if __name__ == "__main__":
