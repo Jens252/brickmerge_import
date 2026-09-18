@@ -68,10 +68,29 @@ class EbaySalesImporter(SalesImporter):
                 df[col] = pd.to_datetime(s, format='%d-%b-%y', errors='coerce')
 
         # Calculate per-line ship cost and filter data
-        df['Verpackung und Versand'] = (df['Verpackung und Versand'] / df['Anzahl'].fillna(1)).ffill()
-        df['Gesamtbetrag'] = df['Gesamtbetrag'].ffill()
-        items = df[df['Verschickt am - Datum'].notna() & df['Artikelnummer'].notna() & (
-                df['Artikelnummer'].str.strip() != '') & (df['Gesamtbetrag'] != 0.0)].copy()
+        is_order_summary_col = df['Gesamtbetrag'].notna() & df['Artikelnummer'].isna()
+        is_single_line_order_col = df['Gesamtbetrag'].notna() & df['Artikelnummer'].notna()
+        is_header = is_order_summary_col | is_single_line_order_col
+        base_total = np.where(is_order_summary_col, df['Verkauft für'],
+                              np.where(is_single_line_order_col, df['Verkauft für'] * df['Anzahl'], np.nan))
+        df['paid_ratio'] = np.where(is_header, (df['Gesamtbetrag'] - df['Verpackung und Versand']) / base_total, np.nan)
+        df['shipping_ratio'] = np.where(is_header, df['Verpackung und Versand'] / base_total, np.nan)
+        df[['paid_ratio', 'shipping_ratio', 'Gesamtbetrag']] = df[
+            ['paid_ratio', 'shipping_ratio', 'Gesamtbetrag']].ffill()
+        df['paid_item_price'] = df['Verkauft für'] * df['paid_ratio']
+        df['unit_shipping'] = df['Verkauft für'] * df['shipping_ratio']
+        diff_mask = (
+                ((df['paid_ratio'] - 1.0).abs() > 0.001)
+                & df['Verschickt am - Datum'].notna()
+                & df['Artikelnummer'].notna()
+                & (df['Gesamtbetrag'] != 0.0)
+        )
+        if diff_mask.any():
+            print("Partial refund found for the following orders:\n",
+                  df.loc[diff_mask, ['Bestellnummer', 'Artikelnummer', 'Bestandseinheit', 'Verkauft für',
+                                     'paid_ratio', 'paid_item_price', 'unit_shipping']].to_string(),
+                  "\nAdjusting item price to paid_item_price value if paid_ratio > 0.5, ignoring if < 0.5.")
+        items = df[df['Verschickt am - Datum'].notna() & df['Artikelnummer'].notna() & (df['paid_ratio'] >= 0.5)].copy()
 
         if items.empty:
             print("No line items found in eBay report.")
@@ -83,9 +102,7 @@ class EbaySalesImporter(SalesImporter):
             return None
 
         new_items.rename(columns={
-            'Verkauft für': 'item_price',
             'Anzahl': 'quantity',
-            'Verpackung und Versand': 'unit_shipping',
             'Verkauft am': 'sale_date'
         }, inplace=True)
 
@@ -93,7 +110,7 @@ class EbaySalesImporter(SalesImporter):
         fee_percent = self.ebay_fee_percent + np.where(new_items['Verkauft über Anzeigen'], self.default_ad_percent, 0)
 
         # Fold shipping per unit into item sale price for Brickmerge export
-        new_items['sale_price'] = (new_items['item_price'] + new_items['unit_shipping']).round(2)
+        new_items['sale_price'] = (new_items['paid_item_price'] + new_items['unit_shipping']).round(2)
         position_total = new_items['sale_price'] * new_items['quantity']
 
         # Platform commission on total order revenue plus actual postage costs
