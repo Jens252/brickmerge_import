@@ -39,10 +39,17 @@ class AmazonSalesImporter(SalesImporter):
                 continue
 
             try:
+                with open(fpath, 'r', encoding='utf-8-sig', errors='ignore') as f:
+                    raw_header = f.readline()
+                # Alle Spalten trennen, von \xa0, \r, \n und Leerzeichen befreien
+                clean_headers = [c.replace('\xa0', '').strip() for c in raw_header.split('\t')]
+
                 df = pd.read_csv(
                     fpath,
                     sep='\t',
                     on_bad_lines='skip',
+                    skiprows=1,
+                    names=clean_headers,
                     dtype={'amazon-order-id': str, 'order-status': str, 'fulfillment-channel': str,
                            'sales-channel': str, 'product-name': str, 'ship-country': str, 'sku': str, 'asin': str,
                            'quantity': float, 'item-price': float, 'shipping-price': float,
@@ -71,7 +78,7 @@ class AmazonSalesImporter(SalesImporter):
         amz_report = amz_report[
             (amz_report['order-status'] == 'Shipped') & (amz_report['sales-channel'] != 'Non-Amazon')]
 
-        new_orders = self.db.filter_new_sales(amz_report, 'Amazon', 'amazon-order-id', 'asin')
+        new_orders = self.db.filter_new_sales(amz_report, 'Amazon', 'amazon-order-id', 'order-item-id')
 
         # Get set identifier from ASIN, SKU or product name
         sku_template = self.db.get_setting("sku_template", "{SET}[-{WERT,1,4}]")
@@ -105,7 +112,7 @@ class AmazonSalesImporter(SalesImporter):
         new_orders.rename(columns={'purchase-date': 'sale_date'}, inplace=True)
 
         import_df = self.export_sales(new_orders, 'Amazon', output_directory)
-        self.db.record_sales(new_orders, 'Amazon', 'amazon-order-id', 'asin')
+        self.db.record_sales(new_orders, 'Amazon', 'amazon-order-id', 'order-item-id')
         return import_df
 
     def asin_to_set_number_fallback(self, asin: str) -> str | None:
