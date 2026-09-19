@@ -1,5 +1,4 @@
 """Manages SQLite storage and deduplication tracking for purchases and sales."""
-import os
 import sqlite3
 import pandas as pd
 
@@ -10,6 +9,7 @@ class Database:
     def __init__(self, db_path: str = "import_history.db"):
         self.conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10.0)
         self._init_db()
+        self.add_examples()
 
     def _init_db(self):
         """Initializes database tables and indexes if they do not exist."""
@@ -47,8 +47,8 @@ class Database:
             # Custom manual mappings for ASIN and eBay item numbers to Lego set numbers
             self.conn.execute("""
             CREATE TABLE IF NOT EXISTS item_mappings (
-                    platform   TEXT, -- 'Amazon' or 'eBay'
-                    identifier TEXT, -- ASIN or eBay Item Numbers or SKUs
+                    platform   TEXT, -- 'Amazon', 'eBay' or 'BrickLink'
+                    identifier TEXT, -- ASIN, eBay Item Numbers/SKUs or BrickLink Item IDs
                     set_number TEXT, -- Mapped Lego Set Number
                     note       TEXT,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -115,18 +115,17 @@ class Database:
                               (platform, identifier))
 
     def add_examples(self):
-        """Some default mappings for testing."""
+        """Inserts default mappings if the mapping table is empty."""
         with self.conn:
-            default_mappings = [
-                ('Amazon', 'B0DRYF9TL5', '71048-12', 'Serie 27 12er'),
-                ('Amazon', 'B0FM8LKWXZ', '71050-12', 'Spider-Man 12er'),
-                ('Amazon', 'B0G64WCRKF', '71051-12', 'Serie 28 12er'),
-                ('Amazon', 'B0GXWW6NLG', '71052-12', 'Serie 29 12er'),
-            ]
-            self.conn.executemany(
-                "INSERT OR IGNORE INTO item_mappings (platform, identifier, set_number, note) VALUES (?, ?, ?, ?)",
-                default_mappings
-            )
+            if self.conn.execute("SELECT COUNT(*) FROM item_mappings").fetchone()[0] == 0:
+                default_mappings = [
+                    ('BrickLink', '6533318-1', '71048-36', '36er Box Serie 27'),
+                    ('BrickLink', '6623266-1', '71052-36', '36er Box Serie 29'),
+                ]
+                self.conn.executemany(
+                    "INSERT OR IGNORE INTO item_mappings (platform, identifier, set_number, note) VALUES (?, ?, ?, ?)",
+                    default_mappings
+                )
 
     # ---------------- IMPORT TRACKING API ----------------
 
@@ -214,64 +213,3 @@ class Database:
 
             print(
                 f"Erfolgreich zurückgesetzt: {target_desc} ({deleted_count} Einträge gelöscht, Batch-Zeit: {last_timestamp})")
-
-
-class DatabaseMigration(Database):
-    """Handles schema and data migration from legacy database files."""
-
-    def __init__(self, new_db_path: str = "import_history.db", old_db_path: str = "amazon_order_import.db"):
-        super().__init__(db_path=new_db_path)
-        if os.path.exists(old_db_path):
-            self._migrate_data(old_db_path)
-
-    def _is_empty(self) -> bool:
-        """Checks if the target tables contain any data."""
-        with self.conn:
-            c1 = self.conn.execute("SELECT COUNT(*) FROM imported_amazon_purchases").fetchone()[0]
-            c2 = self.conn.execute("SELECT COUNT(*) FROM imported_sales").fetchone()[0]
-            return c1 == 0 and c2 == 0
-
-    def _migrate_data(self, old_db_path: str):
-        # Only migrate if new database tables are currently empty
-        if not self._is_empty():
-            return
-
-        try:
-            with self.conn:
-                cursor = self.conn.cursor()
-                cursor.execute(f"ATTACH DATABASE '{old_db_path}' AS old_db;")
-
-                cursor.execute("""
-                    INSERT OR IGNORE INTO main.imported_amazon_purchases (
-                        payment_reference, item_number, asin, import_timestamp
-                    )
-                    SELECT "Payment reference ID", "Item model number", ASIN, import_timestamp
-                    FROM old_db.imported_purchase_orders;
-                """)
-
-                cursor.execute("""
-                    INSERT OR IGNORE INTO main.imported_sales (
-                        platform, order_id, item_identifier, import_timestamp
-                    )
-                    SELECT 'Amazon', "amazon-order-id", asin, import_timestamp
-                    FROM old_db.imported_sales_orders;
-                """)
-
-            print(f"Migration completed successfully from '{old_db_path}'.")
-
-            # Detach before renaming
-            self.conn.execute("DETACH DATABASE old_db;")
-
-            # Rename legacy database as a backup instead of deleting
-            backup_path = old_db_path + ".bak"
-            if not os.path.exists(backup_path):
-                os.rename(old_db_path, backup_path)
-                print(f"Archived old database to '{backup_path}'.")
-
-        except Exception as e:
-            self.conn.execute("DETACH DATABASE old_db;")
-            print(f"Error during migration: {e}")
-
-
-if __name__ == "__main__":
-    db = DatabaseMigration()
