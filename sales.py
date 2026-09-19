@@ -29,8 +29,13 @@ class SalesImporter:
         sales['sale_date'] = pd.to_datetime(sales['sale_date'])
 
         if self.aggregate_sales:
-            sales['groupby_price'] = sales['sale_price'].map(int)
             sales['groupby_month'] = sales['sale_date'].dt.strftime('%Y-%m')
+
+            # 1€-Cluster relativ zum minimalen Verkaufspreis im jeweiligen Monat bilden
+            sales['price_eff'] = (sales['sale_price'] - sales['sales_cost'] / sales['quantity'])  # Price without fees
+            min_eff = sales.groupby(['set_identifier', 'groupby_month', 'channel'])['price_eff'].transform('min')
+            sales['groupby_price'] = ((sales['price_eff'] - min_eff + 1e-9) // 1.0).astype(int)
+
             sales['note'] = sales['sale_date']
             aggregated_sales = sales.groupby(
                 ['set_identifier', 'groupby_month', 'groupby_price', 'channel']
@@ -86,7 +91,7 @@ class SalesImporter:
         """
         if self.depot_export_file is None:
             print("No depot export file provided.")
-            return pd.Series(0.0, index=sales.index)
+            return pd.Series(np.nan, index=sales.index)
 
         bm_depot_df = pd.read_csv(
             self.depot_export_file,
@@ -149,7 +154,7 @@ class SalesImporter:
                     qty_needed -= take
                     bm_depot_df.at[idx, 'qty'] -= take
 
-                avg_ek = (total_ek / total_ek_qty) if total_ek_qty > 0 else 0.0
+                avg_ek = (total_ek / total_ek_qty) if total_ek_qty > 0 else np.nan
                 ek_list.append(avg_ek)
 
                 if qty_needed > 0:
