@@ -453,7 +453,7 @@ class ModernImportGUI(tk.Tk):
             """Persists updated fee and shipping estimates to the database."""
             for k, var in field_entries.items():
                 self.db.set_setting(k, var.get().strip().replace(',', '.'))
-            messagebox.showinfo("Gespeichert", "Versand- und Gebührensätze wurden in der Datenbank gespeichert.")
+            messagebox.showinfo("Gespeichert", "Versand- und Gebührensätze wurden gespeichert.")
 
         # Button-Leiste: SKU-Muster links/mittig, Speichern rechts
         btn_bar = ttk.Frame(config_frame, style="Card.TFrame")
@@ -691,7 +691,7 @@ class ModernImportGUI(tk.Tk):
 
     def _rollback(self, is_sales: bool):
         label = "Sales (Verkäufe)" if is_sales else "Purchases (Einkäufe)"
-        message = f"Letzten Batch für {label} aus der lokalen Datenbank (Tracking-Historie) entfernen?"
+        message = f"Letzten Batch für {label} aus der lokalen Tracking-Historie entfernen?"
         if is_sales:
             message += "\n\nACHTUNG: Die Depot-CSV-Datei wird nicht zurückgesetzt."
         if messagebox.askyesno("Ja", message):
