@@ -30,7 +30,7 @@ class EbaySalesImporter(SalesImporter):
         """
         usecols = ['Verkaufsprotokollnummer', 'Bestellnummer', 'Artikelnummer', 'Angebotstitel', 'Bestandseinheit',
                    'Verkauft über Anzeigen', 'Anzahl', 'Verkauft für', 'Verpackung und Versand', 'Inklusive MwSt.-Satz',
-                   'Gesamtbetrag', 'Verkauft am', 'Verschickt am - Datum']
+                   'Gesamtbetrag', 'Verkauft am', 'Verschickt am - Datum', 'Transaktionsnummer']
         output_directory = os.path.dirname(os.path.abspath(csv_filepath))
         try:
             df = pd.read_csv(csv_filepath,
@@ -41,7 +41,7 @@ class EbaySalesImporter(SalesImporter):
                              usecols=lambda c: c in usecols,
                              dtype={'Verkaufsprotokollnummer': str, 'Bestellnummer': str, 'Artikelnummer': str,
                                     'Angebotstitel': str, 'Bestandseinheit': str, 'Anzahl': float,
-                                    'Inklusive MwSt.-Satz': float},
+                                    'Inklusive MwSt.-Satz': float, 'Transaktionsnummer': str},
                              converters={
                                  'Verkauft für': self._parse_currency,
                                  'Verpackung und Versand': self._parse_currency,
@@ -96,7 +96,7 @@ class EbaySalesImporter(SalesImporter):
             print("No line items found in eBay report.")
             return None
 
-        new_items = self.db.filter_new_sales(items, 'eBay', 'Bestellnummer', 'Artikelnummer')
+        new_items = self.db.filter_new_sales(items, 'eBay', 'Bestellnummer', 'Transaktionsnummer')
         if new_items.empty:
             print("No new eBay sales found.")
             return None
@@ -161,8 +161,8 @@ class EbaySalesImporter(SalesImporter):
         if new_items['set_identifier'].isna().any():
             missing_identifiers = new_items[new_items['set_identifier'].isna()]
             print("Notice: Sales without assigned set number exported to 'ebay_missing_set_numbers.csv'.")
-            missing_identifiers.to_csv(os.path.join(output_directory, "ebay_missing_set_numbers.csv"))
+            missing_identifiers.to_csv(os.path.join(output_directory, "ebay_missing_set_numbers.csv"), index=False)
 
         import_df = self.export_sales(new_items, 'eBay', output_directory)
-        self.db.record_sales(new_items, 'eBay', 'Bestellnummer', 'Artikelnummer')
+        self.db.record_sales(new_items, 'eBay', 'Bestellnummer', 'Transaktionsnummer')
         return import_df

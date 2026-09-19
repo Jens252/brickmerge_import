@@ -26,9 +26,9 @@ class AmazonSalesImporter(SalesImporter):
             return None
 
         usecols = [
-            'amazon-order-id', 'purchase-date', 'order-status', 'fulfillment-channel', 'sales-channel', 'product-name',
-            'ship-country', 'sku', 'asin', 'quantity', 'item-price', 'shipping-price', 'item-promotion-discount',
-            'ship-promotion-discount'
+            'amazon-order-id', 'purchase-date', 'last-updated-date', 'order-status', 'fulfillment-channel',
+            'sales-channel', 'product-name', 'ship-country', 'sku', 'asin', 'quantity', 'item-price', 'shipping-price',
+            'item-promotion-discount', 'ship-promotion-discount', 'order-item-id'
         ]
         output_directory = os.path.dirname(os.path.abspath(file_list[0]))
         loaded_dfs: list[pd.DataFrame] = []
@@ -46,8 +46,9 @@ class AmazonSalesImporter(SalesImporter):
                     dtype={'amazon-order-id': str, 'order-status': str, 'fulfillment-channel': str,
                            'sales-channel': str, 'product-name': str, 'ship-country': str, 'sku': str, 'asin': str,
                            'quantity': float, 'item-price': float, 'shipping-price': float,
-                           'item-promotion-discount': float, 'ship-promotion-discount': float},
-                    parse_dates=['purchase-date'],
+                           'item-promotion-discount': float, 'ship-promotion-discount': float, 'order-item-id': str},
+                    parse_dates=['purchase-date', 'last-updated-date'],
+                    date_format='ISO8601',
                     usecols=lambda c: c in usecols
                 )
                 loaded_dfs.append(df)
@@ -58,7 +59,11 @@ class AmazonSalesImporter(SalesImporter):
             print("Keine gültigen Amazon-Verkaufsberichte gefunden.")
             return None
 
-        amz_report = pd.concat(loaded_dfs, ignore_index=True)
+        amz_report = (pd.concat(loaded_dfs, ignore_index=True)
+                      .sort_values(by='last-updated-date', ascending=False)
+                      .drop_duplicates(subset=['amazon-order-id', 'order-item-id'])
+                      .sort_values(by='purchase-date', ascending=False)
+                      .reset_index(drop=True))
         if len(file_list) > 1:
             print(f"Kombinierte {len(loaded_dfs)} Verkaufsberichte ({len(amz_report)} Zeilen gesamt).")
 

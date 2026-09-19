@@ -19,6 +19,10 @@ class SalesImporter:
 
     def export_sales(self, sales_df: pd.DataFrame, shop: str, output_dir: str | None = None) -> pd.DataFrame:
         """Aggregates sales if configured and exports them into the Brickmerge format."""
+        if sales_df.empty:
+            print("Keine Zeilen zum Exportieren übergeben.")
+            return pd.DataFrame()
+
         sales = sales_df.copy()
         if 'channel' not in sales.columns:
             sales['channel'] = shop
@@ -26,7 +30,7 @@ class SalesImporter:
             sales['buy_price'] = np.nan
 
         # Ensure datetime type for consistent formatting and grouping
-        sales['sale_date'] = pd.to_datetime(sales['sale_date'])
+        sales['sale_date'] = pd.to_datetime(sales['sale_date']).dt.normalize()
 
         if self.aggregate_sales:
             sales['groupby_month'] = sales['sale_date'].dt.strftime('%Y-%m')
@@ -46,7 +50,7 @@ class SalesImporter:
                 'sales_cost': 'sum',
                 'buy_price': 'mean',
                 'note': lambda d: f"Zusammengefasste Verkäufe {d.min().strftime('%d.%m.')}"
-                                  f" - {d.max().strftime('%d.%m.%Y')}" if d.min().date() != d.max().date() else "",
+                                  f" - {d.max().strftime('%d.%m.%Y')}" if pd.notna(d.min()) and d.min() != d.max() else "",
             })
             df = aggregated_sales.reset_index()
         else:
@@ -70,8 +74,11 @@ class SalesImporter:
             else:
                 export_df['buy_price'] = self.process_sales(export_df).fillna(export_df['buy_price']).round(2)
 
-        timestamp_min = sales['sale_date'].min().date().isoformat()
-        timestamp_max = sales['sale_date'].max().date().isoformat()
+        min_val = sales['sale_date'].min()
+        max_val = sales['sale_date'].max()
+
+        timestamp_min = min_val.date().isoformat() if pd.notna(min_val) else "unknown"
+        timestamp_max = max_val.date().isoformat() if pd.notna(max_val) else "unknown"
         filename = f"{shop.lower()}_sales_{timestamp_min}_{timestamp_max}_brickmerge.csv"
 
         if output_dir:

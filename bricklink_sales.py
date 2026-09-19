@@ -25,8 +25,8 @@ class BricklinkSalesImporter(SalesImporter):
     def import_sales(self, csv_filepath: str, ignore_discounts: bool = False) -> pd.DataFrame | None:
         """Import sales data from a Bricklink CSV file and exports in Brickmerge sales CSV format."""
         usecols = ['Order ID', 'Order Date', 'Base Currency', 'Credit', 'Coupon Credit', 'Order Total',
-                   'Base Grand Total', 'Order Status', 'Pmt Method', 'Location', 'Batch Date', 'Condition',
-                   'Sub-Condition', 'Qty', 'Each', 'Item Type', 'Item Number', 'My Cost', 'Sub-Condition']
+                   'Base Grand Total', 'Order Status', 'Pmt Method', 'Location', 'Batch', 'Batch Date', 'Condition',
+                   'Sub-Condition', 'Qty', 'Each', 'Item Type', 'Item Number', 'My Cost']
         try:
             raw_df = pd.read_csv(csv_filepath,
                                  sep=',',
@@ -34,8 +34,8 @@ class BricklinkSalesImporter(SalesImporter):
                                  index_col=False,
                                  on_bad_lines='skip',
                                  dtype={'Order ID': str, 'Base Currency': str, 'Total Items': float,
-                                        'Order Status': str, 'Pmt Method': str, 'Condition': str, 'Qty': float,
-                                        'Sub-Condition': str, 'Item Type': str, 'Item Number': str},
+                                        'Order Status': str, 'Pmt Method': str, 'Batch': str, 'Condition': str,
+                                        'Qty': float, 'Sub-Condition': str, 'Item Type': str, 'Item Number': str},
                                  converters={
                                      'Credit': self._parse_currency,
                                      'Coupon Credit': self._parse_currency,
@@ -69,6 +69,13 @@ class BricklinkSalesImporter(SalesImporter):
             print("Fehler: Keine Artikelzeilen gefunden. Wurde beim BrickLink-Export 'Include detail items' aktiviert?")
             return None
 
+        # Batches derselben Artikelnummer innerhalb derselben Bestellung bündeln
+        items = (
+            items.groupby(['Order ID', 'Item Number'], group_keys=False)
+            .apply(self.aggregate_batches)
+            .reset_index(drop=True)
+        )
+
         new_items = self.db.filter_new_sales(items, 'Bricklink', 'Order ID', 'Item Number')
         if new_items.empty:
             print("No new BrickLink sales found.")
@@ -81,8 +88,7 @@ class BricklinkSalesImporter(SalesImporter):
             new_items['sale_price'] = new_items['Each']
 
         # Adjust item price for VAT
-        country = new_items['Location'].str.split(',').str[0]
-        is_eu_country = country.map(is_eu)
+        is_eu_country = new_items['Location'].map(is_eu)
         new_items['sale_price'] = (new_items['sale_price'] * np.where(is_eu_country, 1.0, 1.19)).round(2)
 
         new_items['sales_cost'] = new_items.apply(
@@ -111,6 +117,45 @@ class BricklinkSalesImporter(SalesImporter):
                 position_value * (self.stripe_fee_percent + self.bricklink_fee_percent), decimals=2)
         else:
             return np.around(position_value * self.bricklink_fee_percent, decimals=2)
+
+    @staticmethod
+    def aggregate_batches(group: pd.DataFrame) -> pd.Series:
+        """Batches aggregieren: Mehrere Batches derselben Item Number zusammenfassen"""
+        total_qty = group['Qty'].sum()
+        # Gewichteter Durchschnitt für Einzelpreise bei unterschiedlichen Batches
+        if total_qty > 0:
+            weighted_each = (group['Each'] * group['Qty']).sum() / total_qty
+            weighted_cost = (group['My Cost'] * group['Qty']).sum() / total_qty
+        else:
+            weighted_each = group['Each'].iloc[0]
+            weighted_cost = group['My Cost'].iloc[0]
+
+        batch_dates = group['Batch Date'].dropna()
+        sale_date = batch_dates.max() if not batch_dates.empty else group['Order Date'].iloc[0]
+
+        return pd.Series(
+            {
+                'Order ID': group['Order ID'].iloc[0] if 'Order ID' in group else None,
+                'Item Number': group['Item Number'].iloc[0] if 'Item Number' in group else None,
+                'Order Date': group['Order Date'].iloc[0],
+                'Base Currency': group['Base Currency'].iloc[0],
+                'Credit': group['Credit'].iloc[0],
+                'Coupon Credit': group['Coupon Credit'].iloc[0],
+                'Order Total': group['Order Total'].iloc[0],
+                'Base Grand Total': group['Base Grand Total'].iloc[0],
+                'Order Status': group['Order Status'].iloc[0],
+                'Pmt Method': group['Pmt Method'].iloc[0],
+                'Location': group['Location'].iloc[0],
+                'Batch': group['Batch'].count(),
+                'Batch Date': sale_date,
+                'Condition': ', '.join(group['Condition'].dropna().unique()),
+                'Sub-Condition': ', '.join(group['Sub-Condition'].dropna().unique()),
+                'Item Type': group['Item Type'].iloc[0],
+                'Qty': total_qty,
+                'Each': weighted_each,
+                'My Cost': weighted_cost,
+            }
+        )
 
     @staticmethod
     def map_bricklink_item_number(item_number: str | None) -> str | None:
