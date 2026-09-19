@@ -631,8 +631,7 @@ class ModernImportGUI(tk.Tk):
         chk.pack(side="left")
         ToolTip(
             chk,
-            "Fasst Verkäufe desselben Artikels innerhalb eines Kalendermonats zusammen, "
-            "deren Verkaufspreis im selben ganzzahligen 1€-Intervall liegt (z. B. 39,20 € und 39,80 €)."
+            "Gebündelt wird monatlich anhand des Nettoerlöses (Verkaufspreis abzgl. Gebühren & Versand) in 1€-Schritten."
         )
         return chk
 
