@@ -19,6 +19,9 @@ class SalesImporter:
 
     def export_sales(self, sales_df: pd.DataFrame, shop: str, output_dir: str | None = None) -> pd.DataFrame:
         """Aggregates sales if configured and exports them into the Brickmerge format."""
+        sales_df = sales_df.dropna(subset=['set_identifier', 'sale_date', 'sale_price', 'quantity'])
+        sales_df = sales_df[sales_df['quantity'] > 0]
+
         if sales_df.empty:
             print("Keine Zeilen zum Exportieren übergeben.")
             return pd.DataFrame()
