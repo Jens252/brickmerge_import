@@ -121,6 +121,8 @@ class BricklinkSalesImporter(SalesImporter):
     @staticmethod
     def aggregate_batches(group: pd.DataFrame) -> pd.Series:
         """Batches aggregieren: Mehrere Batches derselben Item Number zusammenfassen"""
+        order_id, item_number = group.name if hasattr(group, "name") else (None, None)
+
         total_qty = group['Qty'].sum()
         # Gewichteter Durchschnitt für Einzelpreise bei unterschiedlichen Batches
         if total_qty > 0:
@@ -135,8 +137,8 @@ class BricklinkSalesImporter(SalesImporter):
 
         return pd.Series(
             {
-                'Order ID': group['Order ID'].iloc[0] if 'Order ID' in group else None,
-                'Item Number': group['Item Number'].iloc[0] if 'Item Number' in group else None,
+                'Order ID': order_id,
+                'Item Number': item_number,
                 'Order Date': group['Order Date'].iloc[0],
                 'Base Currency': group['Base Currency'].iloc[0],
                 'Credit': group['Credit'].iloc[0],
