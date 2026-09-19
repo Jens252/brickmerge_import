@@ -89,14 +89,14 @@ class BricklinkSalesImporter(SalesImporter):
             lambda row: self.get_fees(row['Pmt Method'], row['sale_price'] * row['Qty']), axis=1)
 
         new_items['set_identifier'] = new_items['Item Number'].map(
-            lambda x: self.db.get_mapped_set_number('BrickLink', x) or x)
+            lambda x: self.db.get_mapped_set_number('BrickLink', x) or self.map_bricklink_item_number(x))
 
         new_items.rename(columns={'Batch Date': 'sale_date',
                                   'Qty': 'quantity',
                                   'My Cost': 'buy_price'}, inplace=True)
 
         import_df = self.export_sales(new_items, 'Bricklink', os.path.dirname(os.path.abspath(csv_filepath)))
-        self.db.record_sales(new_items, 'Bricklink', 'Order ID', 'set_identifier')
+        self.db.record_sales(new_items, 'Bricklink', 'Order ID', 'Item Number')
         return import_df
 
     def get_fees(self, payment_method: str, position_value: float):
@@ -111,3 +111,28 @@ class BricklinkSalesImporter(SalesImporter):
                 position_value * (self.stripe_fee_percent + self.bricklink_fee_percent), decimals=2)
         else:
             return np.around(position_value * self.bricklink_fee_percent, decimals=2)
+
+    @staticmethod
+    def map_bricklink_item_number(item_number: str | None) -> str | None:
+        """
+        Convert Bricklink item numbers to a brickmerge format where different.
+        """
+        if not item_number or not isinstance(item_number, str):
+            return item_number
+
+        item_str = item_number.strip()
+
+        # Split item number into base and suffix
+        parts = item_str.split('-')
+        if len(parts) == 2:
+            base, suffix = parts[0], parts[1]
+
+            if len(base) == 5 and base.isdigit():
+                if 71045 <= int(base) < 71060:
+                    # Convert format for CMF complete series or boxes
+                    if suffix == '2':
+                        return f"{base}-12"
+                    elif suffix == '3':
+                        return f"{base}-36"
+
+        return item_str
