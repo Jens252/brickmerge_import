@@ -109,11 +109,11 @@ class AmazonPurchasesImporter:
         report = aggregated_report.copy()
 
         # Calculate Brickmerge depot acquisition values (including 19% VAT)
+        report['qty'] = report['Item Quantity'].round().astype(int)
         report['buy_price'] = (report['Item subtotal sum'] / report['Item Quantity'] * 1.19).round(2)
         report['note'] = locale
         report.rename(columns={
             'Item model number': 'setNo',
-            'Item Quantity': 'qty',
             'Order Date': 'buy_date',
         }, inplace=True)
         timestamp = report['buy_date'].max().date().strftime('%d_%m_%Y')
