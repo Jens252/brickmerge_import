@@ -1,13 +1,14 @@
-# Brickmerge Depot Importer für Marktplatz Verkäufe und Amazon Buisness Einkäufe
+# Brickmerge Depot Importer für Marktplatz Verkäufe und Amazon Business Einkäufe
 
-Desktop-Anwendung zur automatisierten Generierung von Import CSV-Dateien für brickmerge Depots.
+Desktop-Anwendung zur automatisierten Generierung von Import CSV-Dateien für brickmerge Depots. 
+Zum Ausführen aus dem Quellcode wird mindestens Python **3.10** benötigt.
 
 ---
 
 ## Funktionen
 
-### Einkaufe Importieren: ###
-* **Amazon Buisness**: Verarbeitet Orders Reports, korrigiert mehrfache Einträge und exportiert brickmerge-kompatible CSV-Dateien.
+### Einkäufe importieren: ###
+* **Amazon Business**: Verarbeitet Orders Reports, korrigiert mehrfache Einträge und exportiert brickmerge-kompatible CSV-Dateien.
 
 ### Verkäufe Importieren: ###
 * Generiert CSV-Dateien zum Import im brickmerge Depot für Verkäufe über **Amazon**, **eBay** und **BrickLink** aus den jeweiligen Verkaufsberichten
@@ -36,11 +37,11 @@ Die lauffähige Anwendung kann direkt ohne lokale Python-Installation herunterge
 
 ---
 
-## Installation aus dem Quellcode
+## Ausführen aus dem Quellcode
 
 ### Voraussetzungen
 
-* Python $\ge$ 3.10
+* Python >= 3.10
 * Empfohlen: Virtuelle Umgebung (`venv`)
 
 ### Setup
@@ -48,7 +49,7 @@ Die lauffähige Anwendung kann direkt ohne lokale Python-Installation herunterge
 ```bash
 # Repository klonen
 git clone https://github.com/Jens252/brickmerge_import.git
-cd <REPO-NAME>
+cd brickmerge_import
 
 # Virtuelle Umgebung erstellen und aktivieren
 python -m venv .venv
@@ -59,14 +60,6 @@ source .venv/bin/activate
 
 # Abhängigkeiten installieren
 pip install -r requirements.txt
-
-```
-
-### `requirements.txt`
-
-```text
-pandas
-numpy
 
 ```
 
