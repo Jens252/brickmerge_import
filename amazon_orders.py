@@ -16,14 +16,14 @@ class AmazonPurchasesImporter:
         Creates a Brickmerge Depot import CSV from an Amazon Business Orders Report.
         """
         usecols = [
-            'Order ID', 'Order Date', 'Payment reference ID', 'Item model number', 'Item Quantity', 'Payment Amount',
-            'Item Net Total', 'Item subtotal sum', 'Received quantity', 'ASIN', 'Title', 'Manufacturer',
-            'Item Subtotal', 'Item Shipping & Handling', 'Item Promotion', 'Item VAT', 'Pricing savings programme',
-            'Pricing discount applied', 'Item Subtotal VAT Rate',
+            'Order ID', 'Order Date', 'Order Net Total', 'Payment reference ID', 'Item model number', 'Item Quantity',
+            'Payment Amount', 'Item Net Total', 'Item subtotal sum', 'Received quantity', 'ASIN', 'Title',
+            'Manufacturer', 'Item Subtotal', 'Item Shipping & Handling', 'Item Promotion', 'Item VAT',
+            'Pricing savings programme', 'Pricing discount applied', 'Item Subtotal VAT Rate',
         ]
         output_directory = os.path.dirname(os.path.abspath(amazon_order_report_filename))
         try:
-            with open(amazon_order_report_filename, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(amazon_order_report_filename, encoding='utf-8', errors='ignore') as f:
                 first_line = f.readline()
                 if first_line and 'Order ID' not in first_line:
                     print("Fehler: 'Order ID' nicht im CSV-Header gefunden.")
@@ -42,7 +42,7 @@ class AmazonPurchasesImporter:
                 parse_dates=['Order Date'],
                 date_format='%d/%m/%Y',
                 dtype={
-                    'Item Quantity': float, 'Received quantity': float,
+                    'Order Net Total': float, 'Item Quantity': float, 'Received quantity': float,
                     'Payment Amount': float, 'Item Net Total': float, 'Item subtotal sum': float
                 },
                 converters={
@@ -58,11 +58,13 @@ class AmazonPurchasesImporter:
         locale_file_prefix = locale.replace('.', '_') + '_'
         print(f"Detected Amazon marketplace: {locale}")
 
+        # Correct duplicates in order report
+        amz_report = self.fix_order_report_duplicates(amz_report)
+
         # Drop lines without Payment Reference (unshipped, pending or cancelled orders)
         amz_report = amz_report.dropna(subset=['Payment reference ID']).copy()
         amz_report = amz_report.loc[
             (amz_report['Payment reference ID'].str.strip() != '') & (amz_report['Item Quantity'] > 0)]
-        amz_report = self.fix_order_report_duplicates(amz_report)
 
         # Import LEGO manufacturer lines only
         amz_report = amz_report.loc[amz_report['Manufacturer'].str.lower() == 'lego']
@@ -147,6 +149,9 @@ class AmazonPurchasesImporter:
         }
         group_cols = [col for col in main_cols.union(identification_cols) if col in amazon_order_report.columns]
 
+        # Ignore cancellations
+        amazon_order_report = amazon_order_report.loc[amazon_order_report['Item Quantity'] > 0]
+
         # Detect duplicated lines where single-line payment amount differs from item net total
         mismatch_mask = (amazon_order_report['Payment Amount'] != amazon_order_report['Item Net Total'])
         dup_counts = pd.Series(1, index=amazon_order_report.index)
@@ -174,23 +179,27 @@ class AmazonPurchasesImporter:
                 fixed_report[col] = fixed_report[col].astype(float)
                 fixed_report.loc[mask_dup, col] /= dup_counts[mask_dup]
 
-            # Cross-verify calculated line totals against actual transaction payment sums
-            if 'Payment Amount' in fixed_report.columns:
-                payments = fixed_report[['Order ID', 'Payment reference ID', 'Payment Amount']].drop_duplicates()
-                total_payments_by_order = payments.groupby('Order ID')['Payment Amount'].sum()
-                order_totals = fixed_report.groupby('Order ID')['Item Net Total'].sum()
+            # Cross-verify calculated line totals against actual Order Total and transaction payment sums
+            order_lines_sum = fixed_report.groupby('Order ID')['Item Net Total'].sum()
+            order_total = fixed_report.groupby('Order ID')['Order Net Total'].first()
+            payments = fixed_report[['Order ID', 'Payment reference ID', 'Payment Amount']].drop_duplicates()
+            total_payments_by_order = payments.groupby('Order ID')['Payment Amount'].sum()
 
-                payment_differences = total_payments_by_order - order_totals
-                is_different_mask = payment_differences.abs() > 0.1
-                if is_different_mask.any():
-                    order_with_differences = payment_differences[is_different_mask].index
-                    differences_mask = amazon_order_report['Order ID'].isin(order_with_differences) & mask_dup
-                    if differences_mask.any():
-                        print("Warning: The following order lines might contain unresolved duplicates: \n",
-                              fixed_report.loc[
-                                  differences_mask, ['Order ID', 'ASIN', 'Item Quantity', 'Item subtotal sum']].to_string())
-                    print("Warning: Unresolved payment differences (might be Amazon Rewards Points discounts):\n",
-                          payment_differences[is_different_mask].to_string())
+            line_differences = (order_lines_sum - order_total).round(2)
+            compare_df = pd.DataFrame({'order_total': order_total, 'sum_lines': order_lines_sum,
+                                       'pay_total': total_payments_by_order, 'diff_total_sum': line_differences,
+                                       'diff_sum_pay': total_payments_by_order - order_lines_sum})
+            is_different_mask = line_differences.abs() > 0.1
+            if is_different_mask.any():
+                order_with_differences = line_differences[is_different_mask].index
+                differences_mask = fixed_report['Order ID'].isin(order_with_differences) & mask_dup
+                if differences_mask.any():
+                    print("Warning: The following order lines might contain unresolved duplicates: \n",
+                          fixed_report.loc[
+                              differences_mask, ['Order ID', 'ASIN', 'Item Quantity',
+                                                 'Item subtotal sum']].to_string())
+                print("Warning: Unresolved payment differences:\n",
+                      compare_df.loc[is_different_mask].to_string())
 
         return fixed_report
 
