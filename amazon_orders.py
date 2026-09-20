@@ -1,5 +1,7 @@
 """Handles Amazon Business purchase imports and generates Brickmerge depot acquisition CSVs."""
 import os
+
+import numpy as np
 import pandas as pd
 from database import Database
 
@@ -166,8 +168,16 @@ class AmazonPurchasesImporter:
         fixed_report = amazon_order_report.drop(columns=cols_to_drop).copy()
 
         if mask_dup.any():
+            # 1. Summe der Artikelmenge NUR über die zu teilenden Zeilen pro Bestellung ermitteln
+            dup_qty_sum = fixed_report.loc[mask_dup].groupby(['Order ID', 'ASIN'])['Item Quantity'].transform('sum')
+
+            # 2. Prüfen, ob die Summe glatt durch die Duplikate teilbar ist
+            is_div = (dup_qty_sum % dup_counts.loc[mask_dup]).round(4) == 0
+            mask_div = pd.Series(False, index=fixed_report.index)
+            mask_div.loc[mask_dup] = is_div
+
             print(
-                f"Notice: {mask_dup.sum()} duplicate lines detected. Scaling quantities and subtotals by split factor.")
+                f"Notice: {mask_div.sum()} duplicate lines detected. Scaling quantities and subtotals by duplicate factor.")
 
             # Divide numerical totals by the duplication count
             cols_to_divide = [
@@ -177,7 +187,7 @@ class AmazonPurchasesImporter:
 
             for col in cols_to_divide:
                 fixed_report[col] = fixed_report[col].astype(float)
-                fixed_report.loc[mask_dup, col] /= dup_counts[mask_dup]
+                fixed_report.loc[mask_div, col] /= dup_counts[mask_div]
 
             # Cross-verify calculated line totals against actual Order Total and transaction payment sums
             order_lines_sum = fixed_report.groupby('Order ID')['Item Net Total'].sum()
@@ -187,8 +197,8 @@ class AmazonPurchasesImporter:
 
             line_differences = (order_lines_sum - order_total).round(2)
             compare_df = pd.DataFrame({'order_total': order_total, 'sum_lines': order_lines_sum,
-                                       'pay_total': total_payments_by_order, 'diff_total_sum': line_differences,
-                                       'diff_sum_pay': total_payments_by_order - order_lines_sum})
+                                       'pay_total': total_payments_by_order, 'diff_line_sum_total': line_differences,
+                                       'diff_line_sum_pay': order_lines_sum - total_payments_by_order})
             is_different_mask = line_differences.abs() > 0.1
             if is_different_mask.any():
                 order_with_differences = line_differences[is_different_mask].index
@@ -198,7 +208,7 @@ class AmazonPurchasesImporter:
                           fixed_report.loc[
                               differences_mask, ['Order ID', 'ASIN', 'Item Quantity',
                                                  'Item subtotal sum']].to_string())
-                print("Warning: Unresolved payment differences:\n",
+                print("Warning: Unresolved order line sum differences:\n",
                       compare_df.loc[is_different_mask].to_string())
 
         return fixed_report
