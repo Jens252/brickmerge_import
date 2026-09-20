@@ -65,7 +65,7 @@ class SalesImporter:
             'sale_date': df['sale_date'].dt.strftime('%d.%m.%Y'),
             'sale_price': df['sale_price'].round(2),
             'buy_price': df['buy_price'],
-            'qty': df['quantity'].astype(int),
+            'qty': df['quantity'].round().astype(int),
             'fees': df['sales_cost'].round(2),
             'channel': df['channel'],
             'note': df.get('note'),
